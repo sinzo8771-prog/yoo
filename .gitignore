@@ -1,0 +1,19 @@
+# Upstream reference clones (pinned recon checkouts, not project code)
+/openship/
+/openfront/
+/openfront-storefront/
+
+# Dependencies & build artifacts
+node_modules/
+.next/
+dist/
+build/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
