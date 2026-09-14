@@ -14,6 +14,8 @@ build/
 .env.*
 !.env.example
 
-# OS / editor noise
+# OS / editor / agent noise
 Thumbs.db
 .DS_Store
+.vscode/
+.claude/
