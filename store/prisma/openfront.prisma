@@ -1,0 +1,94 @@
+// Task 4 dev fixture — FOCUSED SUBSET of openfront/schema.prisma @ 2b7181a.
+//
+// This is NOT a schema we migrate. It exists only so a committed script can
+// seed a local dev catalog through the same tables Openfront reads, without
+// depending on the gitignored upstream clone's node_modules.
+//
+// Rules:
+//  - Keep model/field names, @@/ @map names, relation names and enum labels
+//    byte-identical to openfront/schema.prisma, or writes land in the wrong
+//    table/column.
+//  - Add a model here only when the seeder actually writes it.
+//  - Never run `prisma migrate` from this directory.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/openfront-db"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("OPENFRONT_DATABASE_URL")
+}
+
+enum ProductStatusType {
+  draft
+  proposed
+  published
+  rejected
+}
+
+model Currency {
+  id           String        @id @default(cuid())
+  code         String        @unique @default("")
+  symbol       String        @default("")
+  symbolNative String        @default("")
+  name         String        @default("")
+  moneyAmounts MoneyAmount[] @relation("MoneyAmount_currency")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
+}
+
+model Product {
+  id                 String              @id @default(cuid())
+  title              String              @default("")
+  description        Json                @default("[{\"type\":\"paragraph\",\"children\":[{\"text\":\"\"}]}]")
+  handle             String              @unique @default("")
+  subtitle           String              @default("")
+  isGiftcard         Boolean             @default(false)
+  metadata           Json?
+  discountable       Boolean             @default(true)
+  status             ProductStatusType   @default(draft)
+  externalId         String              @default("")
+  productCollections ProductCollection[] @relation("Product_productCollections")
+  productVariants    ProductVariant[]    @relation("ProductVariant_product")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @default(now()) @updatedAt
+}
+
+model ProductCollection {
+  id        String    @id @default(cuid())
+  title     String    @default("")
+  handle    String    @unique @default("")
+  metadata  Json?
+  products  Product[] @relation("Product_productCollections")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
+}
+
+model ProductVariant {
+  id                String        @id @default(cuid())
+  title             String        @default("")
+  sku               String        @default("")
+  inventoryQuantity Int
+  allowBackorder    Boolean       @default(false)
+  manageInventory   Boolean       @default(true)
+  variantRank       Int?          @default(0)
+  product           Product?      @relation("ProductVariant_product", fields: [productId], references: [id])
+  productId         String?       @map("product")
+  prices            MoneyAmount[] @relation("MoneyAmount_productVariant")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @default(now()) @updatedAt
+}
+
+model MoneyAmount {
+  id               String          @id @default(cuid())
+  amount           Int
+  compareAmount    Int?
+  productVariant   ProductVariant? @relation("MoneyAmount_productVariant", fields: [productVariantId], references: [id])
+  productVariantId String?         @map("productVariant")
+  currency         Currency?       @relation("MoneyAmount_currency", fields: [currencyId], references: [id])
+  currencyId       String?         @map("currency")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @default(now()) @updatedAt
+}

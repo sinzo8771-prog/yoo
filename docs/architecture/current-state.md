@@ -283,3 +283,55 @@ Corrections/confirmations discovered while standing up the local environment:
 6. Root tooling added: `docker-compose.yml` (+ Postgres init script), per-repo
    `.env.example`, `scripts/healthcheck.mjs` (GraphQL ping), root `package.json`
    with setup/dev/health scripts, `README.md` quick-start.
+
+## 10. Task 4 addendum (catalog read contract, 2026-09-14)
+
+Verified empirically by seeding a namespaced `devfix_*` fixture into the local
+Openfront database and querying it through the live GraphQL API
+(`store/scripts/check-catalog.ts`, 14/14 assertions). These details are not
+documented upstream and each one silently breaks a naive client:
+
+1. **`Product.description` is a Keystone `document()` field.** It must be
+   selected as `description { document }`; requesting bare `description`
+   returns a document object, not a string. The reference storefront never
+   reads it. Adapter: `store/features/catalog/lib/document.ts`.
+2. **`MoneyAmount.currency` is effectively mandatory.** The `calculatedPrice`
+   resolver (`features/keystone/models/MoneyAmount.ts:123`) dereferences
+   `moneyAmount.currency.code` without a null check, so a price row with no
+   currency **throws and fails the whole `products` query** — not just that
+   variant. Seeders must always connect a `Currency`.
+3. **`calculatedPrice` is a virtual field derived from `amount`**
+   (`MoneyAmount.ts:124`), applying price lists/rules when present. It can be
+   absent/null, so a client that reads only `calculatedPrice` shows **0 prices**.
+   The adapter reads `amount` as the source of truth and treats
+   `calculatedPrice` as an override.
+4. **`Product.thumbnail` is virtual**, resolved from `productImages[0]`'s
+   `image.url` (falling back to `imagePath`). It is null when a product has no
+   images, so clients need an image fallback.
+5. **Availability semantics**: `manageInventory === false` → sellable;
+   otherwise sellable only when `allowBackorder === true` or
+   `inventoryQuantity > 0`.
+6. **SKU must be 1:1 with variant** for the Task 11/22 channel mapping; the
+   contract check asserts every variant exposes a SKU.
+7. **Status enum** is `draft | proposed | published | rejected`; only
+   `published` is storefront-visible (`Product.filter` also enforces this
+   server-side for unauthenticated sessions, so a client-side filter is a
+   convenience and not the security boundary).
+
+### Quality-gate findings (blocking for CI in Task 23)
+
+8. **`next build` silently ignores type errors.** `store/next.config.ts` (and
+   the reference clone) sets `typescript: { ignoreBuildErrors: true }` — an
+   upstream workaround for diverged Keystone views. A build passing therefore
+   proves nothing about type safety. `npx tsc --noEmit` currently reports
+   **195 inherited errors** (193 in `features/` — mostly implicit-`any` in the
+   payment/shipping adapters, plus a Stripe API-version mismatch in
+   `features/integrations/payment/stripe.ts:9` — and 2 in `app/`). None are in
+   Task 4 code. A `typecheck` script has been added; fixing this debt needs its
+   own task before CI can gate on types.
+9. **Duplicated lockfiles** (root `package.json` from Task 2 plus
+   `store/package-lock.json`) make Next warn that it inferred the workspace root
+   ambiguously. Harmless today; pin `turbopack.root` if it ever surfaces.
+10. **No tests or CI existed upstream in any of the three repos.** The only
+    tests in this project are the ones added here (3 files, 37 tests).
+

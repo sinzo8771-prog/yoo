@@ -67,6 +67,32 @@ Hard rules (from the plan):
 - Shipping provider (Shippo/ShipEngine) credentials are configured per-provider in the
   DB via the dashboards, not env vars, in the current revisions.
 
+## Custom storefront app (`store/`)
+
+`store/` is the project's own storefront (Task 3+), scaffolded from the pinned
+`openfront-storefront` reference. It talks to Openfront over GraphQL at
+`NEXT_PUBLIC_BACKEND_URL`.
+
+```bash
+cd store
+npm run dev            # PORT=3003
+npm test               # vitest unit tests
+npm run check:catalog  # live contract check against a running Openfront
+npm run seed:dev       # seed the local dev catalog fixture
+npm run seed:dev -- --purge   # remove ONLY the fixture rows
+```
+
+Dev catalog fixture (Task 4, Step 4) — writes 3 products / 6 variants / 2
+collections, all with deterministic `devfix_*` ids:
+
+- **Idempotent**: rows are upserted, so re-running converges.
+- **Non-destructive**: only `devfix_*` ids are ever written or deleted, so a real
+  catalog can coexist. `--purge` removes only those rows.
+- Requires `OPENFRONT_DATABASE_URL` (seeder only; the storefront never reads it)
+  and `npm run db:generate:openfront` (run automatically by `prebuild`).
+- The fixture deliberately covers the availability matrix: in-stock, zero-stock
+  without backorder (unavailable), and zero-stock with backorder (available).
+
 ## Health checks
 
 `scripts/healthcheck.mjs` POSTs `{ __typename }` to each GraphQL endpoint (5s timeout,
@@ -112,4 +138,13 @@ node scripts/healthcheck.mjs https://staging.example.com/api/graphql
 | `npm run build` (openship: keystone build + migrate + next build) | ✅ 19 tables migrated |
 | `npm run build` (openfront, with S3 placeholders) | ✅ 115 tables migrated |
 | Local PostgreSQL 17 | ✅ running; `openfront` + `openship` databases created |
-| `npm run health` | pending first boot of the servers (smoke-test during Task 3+) |
+| `npm run health` | ✅ passes with all three apps booted (verified during Task 3) |
+
+## Task 4 verification results (2026-09-14)
+
+| Check | Result |
+|---|---|
+| `npm test` (store unit tests) | ✅ 37 passed / 3 files |
+| `npm run seed:dev` (1st, 2nd, 3rd run) | ✅ 3 products / 6 variants / 6 prices / 2 collections each time (idempotent) |
+| `npm run check:catalog` against live Openfront :3000 | ✅ 14/14 assertions passed |
+| `npm run build` (store, `prebuild` regenerates Prisma client) | ✅ all routes compiled |

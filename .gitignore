@@ -8,6 +8,8 @@ node_modules/
 .next/
 dist/
 build/
+# Generated Prisma clients (recreated by `npm run db:generate:openfront`)
+generated/
 
 # Secrets — never commit
 .env
