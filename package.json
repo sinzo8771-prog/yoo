@@ -1,0 +1,24 @@
+{
+  "name": "dropshipping-store",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace orchestrating Openfront (commerce), OpenShip (fulfillment routing), and the custom storefront. See DROPSHIPPING-AGENT-PLAN.md.",
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "health": "node scripts/healthcheck.mjs",
+    "setup:openfront": "cd openfront && npm ci",
+    "setup:openship": "cd openship && npm ci",
+    "setup:storefront": "cd openfront-storefront && npm ci",
+    "setup": "npm run setup:openfront && npm run setup:openship && npm run setup:storefront",
+    "dev:openfront": "cd openfront && npm run dev",
+    "dev:openship": "cd openship && cross-env PORT=3001 npm run dev",
+    "dev:storefront": "cd openfront-storefront && cross-env PORT=3002 npm run dev"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

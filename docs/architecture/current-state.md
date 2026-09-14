@@ -254,3 +254,32 @@ Supplier / 3PL API  ──► TrackingDetail ──► customer-safe tracking pr
 - [x] Items marked experimental/incomplete/provider-dependent (§6: dual-Next overrides,
       stale storefront, missing .env.example/Dockerfile, setInterval delivery,
       dynamic adapter function resolution)
+
+## 9. Task 2 addendum (environment verification, 2026-09-14)
+
+Corrections/confirmations discovered while standing up the local environment:
+
+1. **`.env.example` files now exist** in all three repos (they were absent upstream),
+   populated strictly from code-verified `process.env` usage. Canonical requirements:
+   - Openfront: `DATABASE_URL`, `SESSION_SECRET` (≥32, enforced), plus — **contrary to its
+     README, which calls S3 "optional"** — all five `S3_*` vars are **mandatory when
+     `NODE_ENV=production`** (`productionEnv()` in `features/keystone/index.ts` throws).
+     CI/production builds must set them (placeholders suffice for storage-less builds).
+   - OpenShip: `DATABASE_URL` (⚠️ SQLite fallback), `SESSION_SECRET` (⚠️ insecure fallback),
+     `NEXT_PUBLIC_URL`, `OAUTH_STATE_SECRET` (⚠️ dev fallback), Shopify keys, SMTP
+     (`SMTP_HOST/PORT/USER/PASSWORD/FROM/STORE_LINK`, `MAIL_USER` for Ethereal previews).
+   - Storefront: only `NEXT_PUBLIC_BACKEND_URL` + public payment keys.
+2. **SMTP var names verified** in `features/keystone/lib/mail.ts` (both apps):
+   `SMTP_PASSWORD` (not `SMTP_PASS`), `SMTP_FROM` (not `FROM_EMAIL`), `SMTP_STORE_LINK`.
+3. **Shipping provider keys are DB-configured**, not env — the READMEs' `SHIPPO_API_KEY`
+   entries do not correspond to any env read in app source.
+4. **Storefront build defect fixed locally**: `pages/api/graphql.ts` referenced a
+   nonexistent `features/keystone/context` and failed `next build`; the decoupled
+   storefront resolves GraphQL exclusively via `NEXT_PUBLIC_BACKEND_URL`, so the file
+   was deleted in this workspace (upstream-PR candidate). After the fix the storefront
+   builds cleanly.
+5. **All three apps verified building** against the pinned SHAs; OpenShip migrations
+   applied (19 tables), Openfront migrations applied (115 tables) on local PostgreSQL 17.
+6. Root tooling added: `docker-compose.yml` (+ Postgres init script), per-repo
+   `.env.example`, `scripts/healthcheck.mjs` (GraphQL ping), root `package.json`
+   with setup/dev/health scripts, `README.md` quick-start.
