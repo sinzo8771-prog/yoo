@@ -14,6 +14,9 @@ build/
 .env.*
 !.env.example
 
+# Dev server logs (local)
+logs-*.txt
+
 # OS / editor / agent noise
 Thumbs.db
 .DS_Store
