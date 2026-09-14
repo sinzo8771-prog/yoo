@@ -95,10 +95,13 @@ node scripts/healthcheck.mjs https://staging.example.com/api/graphql
    imported a nonexistent `features/keystone/context` and broke `next build`. The decoupled
    storefront never serves GraphQL locally (all traffic goes to `NEXT_PUBLIC_BACKEND_URL`),
    so the file was removed in this workspace. Consider an upstream PR.
-6. **Docker is not installed on this machine** — the bundled `docker-compose.yml` works on
-   Docker-capable hosts; this workstation instead uses the pre-installed local
-   PostgreSQL 17 service (databases `openfront` + `openship` already created, password
-   `postgres` per the templates). `psql` is at `C:\Program Files\PostgreSQL\17\bin\psql.exe`.
+6. **Docker Desktop 4.91.0 IS installed** (per-user: `C:\Users\lenovo\AppData\Local\Programs\DockerDesktop`
+   — **not on PATH** by default; add `...\DockerDesktop\resources\bin` or use `npm run db:up`
+   after adding it to your profile PATH). Engine verified working (client/server 29.8.0, WSL2/Ubuntu).
+   - The containerized Postgres runs on host port **5433** (see `docker-compose.override.yml`)
+     because the workstation's local PostgreSQL 17 service already owns 5432.
+   - ⚠️ Keep shell scripts in `docker/postgres-init/` **LF-only** — CRLF breaks the
+     container's bash (this bit us once; the script has been converted).
 
 ## Task 2 verification results (2026-09-14)
 

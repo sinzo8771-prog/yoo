@@ -1,0 +1,8 @@
+# Per-host override: the dev workstation's local PostgreSQL 17 service already
+# listens on 5432, so the container is exposed on 5433 instead.
+# (Apps' .env files keep pointing at the local 5432 instance; use 5433 only when
+# you want to test against the containerized Postgres.)
+services:
+  postgres:
+    ports: !override
+      - "5433:5432"
