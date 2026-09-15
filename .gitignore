@@ -18,6 +18,7 @@ generated/
 
 # Dev server logs (local)
 logs-*.txt
+logs-*.html
 
 # OS / editor / agent noise
 Thumbs.db
