@@ -35,9 +35,9 @@ export default async function Logo() {
         className="size-4 sm:size-5"
         aria-hidden="true"
       />
-      <h1 className="flex items-center tracking-wide text-base sm:text-lg">
+      <span className="flex items-center tracking-wide text-base sm:text-lg">
         <span className="font-medium">{storeName.toLowerCase()}</span>
-      </h1>
+      </span>
     </LocalizedClientLink>
   );
 }

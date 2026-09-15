@@ -19,6 +19,26 @@ import { PrismaClient, type Prisma } from "../generated/openfront-db";
 
 const ID = "devfix_";
 const CURRENCY_CODE = "usd";
+const REGION_CODE = "us";
+const COUNTRY_ISO2 = "us";
+
+/** Brand-facing store record, so `/store` metadata is not the Openfront default. */
+const STORE = {
+  key: "store",
+  name: "Northwind Goods",
+  defaultCurrencyCode: CURRENCY_CODE,
+  homepageTitle: "Northwind Goods — considered objects for everyday life",
+  homepageDescription:
+    "A small catalog of solid oak, washed linen and stoneware. Prices and availability are read live from our catalog.",
+};
+
+const COUNTRY = {
+  iso2: COUNTRY_ISO2,
+  iso3: "usa",
+  numCode: 840,
+  name: "United States",
+  displayName: "United States",
+};
 
 const prisma = new PrismaClient();
 
@@ -172,6 +192,66 @@ async function ensureCurrencyId(): Promise<string> {
 async function seed(): Promise<void> {
   const currencyId = await ensureCurrencyId();
 
+  const storeId = `${ID}${STORE.key}`;
+  await prisma.store.upsert({
+    where: { id: storeId },
+    update: {
+      name: STORE.name,
+      defaultCurrencyCode: STORE.defaultCurrencyCode,
+      currencies: { connect: { id: currencyId } },
+    },
+    create: {
+      id: storeId,
+      name: STORE.name,
+      defaultCurrencyCode: STORE.defaultCurrencyCode,
+      currencies: { connect: { id: currencyId } },
+    },
+  });
+
+  // Region + country so the country-code routes and region-scoped reference
+  // queries resolve. `taxRate` has no database default, so it must be set.
+  const regionId = `${ID}region_${REGION_CODE}`;
+  await prisma.region.upsert({
+    where: { id: regionId },
+    update: {
+      code: REGION_CODE,
+      name: COUNTRY.displayName,
+      taxRate: 0,
+      taxCode: REGION_CODE.toUpperCase(),
+      currency: { connect: { id: currencyId } },
+    },
+    create: {
+      id: regionId,
+      code: REGION_CODE,
+      name: COUNTRY.displayName,
+      taxRate: 0,
+      taxCode: REGION_CODE.toUpperCase(),
+      currency: { connect: { id: currencyId } },
+    },
+  });
+
+  const countryId = `${ID}country_${COUNTRY.iso2}`;
+  await prisma.country.upsert({
+    where: { id: countryId },
+    update: {
+      iso2: COUNTRY.iso2,
+      iso3: COUNTRY.iso3,
+      numCode: COUNTRY.numCode,
+      name: COUNTRY.name,
+      displayName: COUNTRY.displayName,
+      region: { connect: { id: regionId } },
+    },
+    create: {
+      id: countryId,
+      iso2: COUNTRY.iso2,
+      iso3: COUNTRY.iso3,
+      numCode: COUNTRY.numCode,
+      name: COUNTRY.name,
+      displayName: COUNTRY.displayName,
+      region: { connect: { id: regionId } },
+    },
+  });
+
   for (const collection of COLLECTIONS) {
     const id = `${ID}collection_${collection.key}`;
     await prisma.productCollection.upsert({
@@ -234,6 +314,12 @@ async function seed(): Promise<void> {
       const priceData = {
         amount: variant.price,
         compareAmount: variant.compareAmount ?? null,
+        productVariantId: variantId,
+        // Region-scoped as well as currency-scoped: the reference storefront
+        // filters prices by region, our client by currency. Setting both keeps
+        // the two clients looking at the same rows.
+        regionId,
+        currencyId,
       };
 
       await prisma.moneyAmount.upsert({
@@ -242,23 +328,26 @@ async function seed(): Promise<void> {
         create: {
           id: priceId,
           ...priceData,
-          currency: { connect: { id: currencyId } },
-          productVariant: { connect: { id: variantId } },
         },
       });
     }
   }
 
-  const [products, variants, prices, collections] = await Promise.all([
-    prisma.product.count({ where: { id: { startsWith: ID } } }),
-    prisma.productVariant.count({ where: { id: { startsWith: ID } } }),
-    prisma.moneyAmount.count({ where: { id: { startsWith: ID } } }),
-    prisma.productCollection.count({ where: { id: { startsWith: ID } } }),
-  ]);
+  const [products, variants, prices, collections, stores, regions, countries] =
+    await Promise.all([
+      prisma.product.count({ where: { id: { startsWith: ID } } }),
+      prisma.productVariant.count({ where: { id: { startsWith: ID } } }),
+      prisma.moneyAmount.count({ where: { id: { startsWith: ID } } }),
+      prisma.productCollection.count({ where: { id: { startsWith: ID } } }),
+      prisma.store.count({ where: { id: { startsWith: ID } } }),
+      prisma.region.count({ where: { id: { startsWith: ID } } }),
+      prisma.country.count({ where: { id: { startsWith: ID } } }),
+    ]);
 
   console.log(
     `Seeded dev fixture: ${products} products, ${variants} variants, ` +
-      `${prices} prices, ${collections} collections (all "${ID}*" ids).`
+      `${prices} prices, ${collections} collections, ${stores} store, ` +
+      `${regions} region, ${countries} country (all "${ID}*" ids).`
   );
 }
 
@@ -270,12 +359,16 @@ async function purge(): Promise<void> {
   const variants = await prisma.productVariant.deleteMany({ where: scope });
   const products = await prisma.product.deleteMany({ where: scope });
   const collections = await prisma.productCollection.deleteMany({ where: scope });
+  const countries = await prisma.country.deleteMany({ where: scope });
+  const regions = await prisma.region.deleteMany({ where: scope });
+  const stores = await prisma.store.deleteMany({ where: scope });
   const currencies = await prisma.currency.deleteMany({ where: scope });
 
   console.log(
     `Purged dev fixture: ${prices.count} prices, ${variants.count} variants, ` +
       `${products.count} products, ${collections.count} collections, ` +
-      `${currencies.count} currencies.`
+      `${countries.count} countries, ${regions.count} regions, ` +
+      `${stores.count} stores, ${currencies.count} currencies.`
   );
 }
 

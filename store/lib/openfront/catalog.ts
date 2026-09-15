@@ -38,16 +38,28 @@ export class CatalogClientError extends Error {
 
 export type CatalogImage = { url: string; alt?: string };
 
+/** A collection and its (published) products. */
+export type CatalogCollection = {
+  /** Merchant-authored title; null when the collection has no title set. */
+  title: string | null;
+  products: CatalogProduct[];
+};
+
 export type CatalogVariant = {
   id: string;
   title: string;
   sku?: string;
-  /** Calculated price in minor units (cents). */
+  /** Charge price in minor units (cents). Meaningful only when `hasPrice`. */
   price: number;
   /** Original price in minor units when discounted. */
   originalPrice?: number;
   currencyCode: string;
   available: boolean;
+  /**
+   * False when Openfront returned no usable price for this variant. Keeps
+   * "no price data" from being rendered as a real "$0.00".
+   */
+  hasPrice: boolean;
 };
 
 export type CatalogProduct = {
@@ -167,6 +179,11 @@ function mapVariant(
   const calculated = chosen?.calculatedPrice ?? null;
 
   const price = calculated?.calculatedAmount ?? chosen?.amount ?? 0;
+  // A price of exactly 0 is only trustworthy when Openfront actually returned a
+  // zero price; otherwise we have no price data at all.
+  const hasPrice =
+    typeof calculated?.calculatedAmount === "number" ||
+    typeof chosen?.amount === "number";
 
   // A "was" price is only meaningful when it is strictly above what we charge.
   const originalPrice = [chosen?.compareAmount, calculated?.originalAmount].find(
@@ -189,6 +206,7 @@ function mapVariant(
     originalPrice,
     currencyCode: (chosen ? currencyOf(chosen) : "") || preferredCurrency,
     available,
+    hasPrice,
   };
 }
 
@@ -305,7 +323,7 @@ async function loadProductBySlug(
 export function getCollectionBySlug(
   slug: string,
   limit: number = 24
-): Promise<{ products: CatalogProduct[] }> {
+): Promise<CatalogCollection> {
   return cached(`catalog:collection:${slug}:${limit}`, () =>
     loadCollectionBySlug(slug, limit)
   );
@@ -314,11 +332,12 @@ export function getCollectionBySlug(
 async function loadCollectionBySlug(
   slug: string,
   limit: number
-): Promise<{ products: CatalogProduct[] }> {
+): Promise<CatalogCollection> {
   const query = gql`
     query CatalogCollection($handle: String!, $limit: Int!) {
       productCollections(where: { handle: { equals: $handle } }, take: 1) {
         id
+        title
         products(
           where: { status: { equals: ${PUBLISHED} } }
           take: $limit
@@ -331,7 +350,11 @@ async function loadCollectionBySlug(
     ${PRODUCT_FIELDS}
   `;
   const data = await requestCatalog<{
-    productCollections: Array<{ products: RawProduct[] }>;
+    productCollections: Array<{
+      id: string;
+      title: string | null;
+      products: RawProduct[];
+    }>;
   }>(query, { handle: slug, limit });
 
   if (!data || !Array.isArray(data.productCollections)) {
@@ -340,7 +363,11 @@ async function loadCollectionBySlug(
     );
   }
   const collection = data.productCollections[0];
-  return { products: (collection?.products ?? []).map(mapProduct) };
+  return {
+    // The merchant-authored title, so callers never have to prettify a handle.
+    title: collection?.title ?? null,
+    products: (collection?.products ?? []).map(mapProduct),
+  };
 }
 
 /**

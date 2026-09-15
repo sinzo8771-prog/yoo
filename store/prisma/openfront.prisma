@@ -35,8 +35,45 @@ model Currency {
   symbolNative String        @default("")
   name         String        @default("")
   moneyAmounts MoneyAmount[] @relation("MoneyAmount_currency")
+  regions      Region[]      @relation("Region_currency")
+  stores       Store[]       @relation("Currency_stores")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @default(now()) @updatedAt
+}
+
+/// Columns we never write are declared optional (`?`) so Prisma omits them from
+/// the INSERT and the database default applies. Never "fix" one by adding a
+/// literal @default — that would write a value the merchant never chose.
+model Store {
+  id                  String     @id
+  name                String?
+  defaultCurrencyCode String?
+  homepageTitle       String?
+  homepageDescription String?
+  currencies          Currency[] @relation("Currency_stores")
+}
+
+model Region {
+  id        String    @id @default(cuid())
+  code      String    @unique @default("")
+  name      String    @default("")
+  taxRate   Float
+  taxCode   String    @default("")
+  currency  Currency? @relation("Region_currency", fields: [currencyId], references: [id])
+  currencyId String?  @map("currency")
+  countries Country[] @relation("Country_region")
+  moneyAmounts MoneyAmount[] @relation("MoneyAmount_region")
+}
+
+model Country {
+  id          String  @id @default(cuid())
+  iso2        String  @unique @default("")
+  iso3        String  @default("")
+  numCode     Int
+  name        String  @default("")
+  displayName String  @default("")
+  region      Region? @relation("Country_region", fields: [regionId], references: [id])
+  regionId    String? @map("region")
 }
 
 model Product {
@@ -87,6 +124,8 @@ model MoneyAmount {
   compareAmount    Int?
   productVariant   ProductVariant? @relation("MoneyAmount_productVariant", fields: [productVariantId], references: [id])
   productVariantId String?         @map("productVariant")
+  region           Region?         @relation("MoneyAmount_region", fields: [regionId], references: [id])
+  regionId         String?         @map("region")
   currency         Currency?       @relation("MoneyAmount_currency", fields: [currencyId], references: [id])
   currencyId       String?         @map("currency")
   createdAt        DateTime        @default(now())
