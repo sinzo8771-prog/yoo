@@ -28,7 +28,7 @@ export default async function ProductPage({
 }: {
   params: Promise<{ countryCode: string; handle: string }>;
 }) {
-  const { handle } = await params;
-  return <ProductDetailScreen handle={handle} />;
+  const { countryCode, handle } = await params;
+  return <ProductDetailScreen handle={handle} countryCode={countryCode} />;
 }
 

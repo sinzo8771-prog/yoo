@@ -23,8 +23,11 @@ import { RiLoader2Fill } from "@remixicon/react";
 
 export function AddToCartForm({
   product,
+  countryCode,
 }: {
   product: CatalogProduct;
+  /** Region from the `[countryCode]` route segment — drives cart + redirect. */
+  countryCode: string;
 }) {
   const router = useRouter();
   const variantId = useSelectedVariantId();
@@ -50,9 +53,10 @@ export function AddToCartForm({
       await addToCart({
         variantId,
         quantity,
-        countryCode: "us", // TODO(Task 9): derive from country segment when available
+        countryCode,
       });
-      router.push("/cart");
+      // The cart lives under the region segment; `/cart` alone would 404.
+      router.push(`/${countryCode}/cart`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not add to cart");
     } finally {

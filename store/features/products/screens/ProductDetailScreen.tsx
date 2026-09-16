@@ -29,10 +29,13 @@ import { site } from "@/lib/brand/site";
 
 export interface ProductDetailScreenProps {
   handle: string;
+  /** Region from the `[countryCode]` route segment. */
+  countryCode: string;
 }
 
 export default async function ProductDetailScreen({
   handle,
+  countryCode,
 }: ProductDetailScreenProps) {
   const product = await getProductBySlug(handle);
   if (!product) {
@@ -69,7 +72,7 @@ export default async function ProductDetailScreen({
             defaultVariantId={defaultVariant?.id ?? undefined}
           />
 
-          <AddToCartForm product={product} />
+          <AddToCartForm product={product} countryCode={countryCode} />
 
           <ProductDescription product={product} />
         </div>
