@@ -1,3 +1,48 @@
+/**
+ * Task 8 — customer-safe order shapes.
+ *
+ * The order payloads rendered by the storefront are whitelist projections from
+ * `features/storefront/lib/data/orders.ts` (internal fields such as secretKey,
+ * paymentDetails, fulfillmentDetails and raw gateway payloads never reach the
+ * client). The templates consume a broad, dynamic surface, so these types keep
+ * an index signature while naming the fields the UI relies on.
+ */
+export type StoreOrder = {
+  [key: string]: any
+  id: string
+  displayId?: string | null
+  status?: string | null
+  fulfillmentStatus?: { status?: string | null } | null
+  email?: string | null
+  subtotal?: string | null
+  shipping?: string | null
+  discount?: string | null
+  tax?: string | null
+  total?: string | null
+  formattedTotalPaid?: string | null
+  createdAt?: string | null
+  region?: { id: string; name?: string | null; currency: { code: string } } | null
+}
+
+export type StorefrontOrderOverviewItem = {
+  [key: string]: any
+  id: string
+  displayId?: string | null
+  status?: string | null
+  fulfillmentStatus?: string | null
+  total?: string | null
+  formattedTotalPaid?: string | null
+  createdAt?: string | null
+  lineItems?: {
+    id: string
+    title?: string | null
+    quantity?: number
+    thumbnail?: string | null
+  }[]
+  region?: { id: string; currency?: { code?: string } | null } | null
+  shippingAddress?: { country?: { id?: string; iso2?: string } | null } | null
+}
+
 export interface ProductWhereClause {
   productCollections?: {
     some: { id: { equals: any } }

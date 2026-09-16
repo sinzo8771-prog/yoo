@@ -67,7 +67,7 @@ rather than inventing a new table.
 | Address validation | `validateShippingAddress` |
 | Payment session | `createActiveCartPaymentSessions`, `setActiveCartPaymentSession`, `initiatePaymentSession` |
 | **Place order** | `completeActiveCart(cartId, paymentSessionId)` — returns order incl. `secretKey` for guest order access |
-| Order lookup | `getCustomerOrder(s)`, plus guest `secretKey` path |
+| Order lookup | `getCustomerOrder(s)`, plus guest `secretKey` path. Store-side `lib/data/orders.ts` enforces an ID-shape gate, maps every backend rejection to `null` → 404, and projects responses to a **customer-safe shape** (`secretKey`, `paymentDetails`, `fulfillmentDetails`, `user`, and raw gateway payment `data` are stripped; payment `data` survives only as `{ cardBrand?, cardLast4? }`) |
 | Fulfillment | `createOrderFulfillment`, `cancelOrderFulfillment`, `trackShipment`, `getRatesForOrder` |
 | Returns/refunds | `processReturnRefund`, `transitionOrderStatus` |
 
