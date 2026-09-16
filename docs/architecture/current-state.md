@@ -71,8 +71,16 @@ rather than inventing a new table.
 | Fulfillment | `createOrderFulfillment`, `cancelOrderFulfillment`, `trackShipment`, `getRatesForOrder` |
 | Returns/refunds | `processReturnRefund`, `transitionOrderStatus` |
 
-Cart identity: cookie **`_openfront_cart_id`**; auth headers resolved via
-`lib/data/cookies.ts` (`getAuthHeaders`). Guest checkout supported via `secretKey`.
+Cart identity: cookie **`_openfront_cart_id`** holds a **signed cart proof**
+(`v1.<cartId>.<expiresAt>.<hmac-sha256>`), _not_ a raw cart id. `assertCartAccess`
+(`features/keystone/security/cart-access.ts`) rejects anonymous cart reads/writes
+unless the caller presents a proof that verifies against the backend's
+`CREDENTIAL_PEPPER`/`SESSION_SECRET`; the raw cookie value is never accepted as
+proof. `lib/data/cookies.ts` mints/verifies it (`setCartId`/`getCartId`) and
+`getAuthHeaders` forwards it as the `x-openfront-cart-proof` header. **Any cart
+GraphQL call that omits those headers fails with "Cart not found"**, so the
+storefront must be configured with the *same* secret as the backend.
+Guest checkout supported via `secretKey`.
 
 Checkout internals: `features/keystone/checkout/order-commit.ts` and `recovery.ts` exist —
 inspect before adding any checkout-side logic.

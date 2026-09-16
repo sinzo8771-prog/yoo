@@ -29,8 +29,17 @@ vi.mock("@/features/storefront/lib/config", () => ({
 vi.mock("next/headers", () => ({
   cookies: () => ({
     get: (key: string) => (cookieStore[key] ? { value: cookieStore[key] } : undefined),
-    set: (key: string, value: string, options?: { maxAge?: number }) => {
-      if (options?.maxAge && options.maxAge < 0) {
+    set: (
+      key: string,
+      value: string,
+      options?: { maxAge?: number; expires?: Date }
+    ) => {
+      // Mirror real Next.js semantics: a non-positive maxAge or a past expiry
+      // clears the cookie (the hardened removeCartId uses maxAge 0 + expires 0).
+      const cleared =
+        (typeof options?.maxAge === "number" && options.maxAge <= 0) ||
+        (options?.expires instanceof Date && options.expires.getTime() <= 0);
+      if (cleared) {
         delete cookieStore[key];
       } else {
         cookieStore[key] = value;
@@ -57,6 +66,7 @@ import {
   deleteLineItem,
   getOrSetCart,
 } from "@/features/storefront/lib/data/cart";
+import { getCartId, setCartId } from "@/features/storefront/lib/data/cookies";
 
 beforeEach(() => {
   requestMock.mockReset();
@@ -135,7 +145,7 @@ describe("getOrSetCart stale-cart handling (Task 7, Step 1)", () => {
 
   it("creates a new cart when the stored cart no longer exists in Openfront", async () => {
     // Simulate a cartId cookie that points to a non-existent cart
-    cookieStore["_openfront_cart_id"] = "stale-cart-id";
+    await setCartId("stale-cart-id");
 
     requestMock
       .mockResolvedValueOnce({ activeCart: null }) // 1st: cart lookup returns null
@@ -149,7 +159,7 @@ describe("getOrSetCart stale-cart handling (Task 7, Step 1)", () => {
     expect(result).toBeDefined();
     expect(result.id).toBe("new-cart");
     // The stale cart cookie should have been cleared and then set to the new cart ID
-    expect(cookieStore["_openfront_cart_id"]).toBe("new-cart");
+    expect(await getCartId()).toBe("new-cart");
   });
 
   it("throws when no region matches the country code", async () => {
@@ -173,7 +183,7 @@ describe("placeOrder redirect URL construction (Task 7, Step 2)", () => {
       },
     });
 
-    cookieStore["_openfront_cart_id"] = "test-cart";
+    await setCartId("test-cart");
 
     const result = await placeOrder();
 
@@ -196,14 +206,14 @@ describe("placeOrder redirect URL construction (Task 7, Step 2)", () => {
       },
     });
 
-    cookieStore["_openfront_cart_id"] = "test-cart";
+    await setCartId("test-cart");
 
     const result = await placeOrder();
 
     expect(result.success).toBe(true);
     expect(result.redirectTo).toBe("/us/order/confirmed/order_456");
     // Cart cookie should be cleared after successful order
-    expect(cookieStore["_openfront_cart_id"]).toBeUndefined();
+    expect(await getCartId()).toBeUndefined();
   });
 
   it("throws when cart cookie is missing", async () => {
@@ -215,7 +225,7 @@ describe("placeOrder redirect URL construction (Task 7, Step 2)", () => {
       completeActiveCart: null,
     });
 
-    cookieStore["_openfront_cart_id"] = "test-cart";
+    await setCartId("test-cart");
 
     const result = await placeOrder();
 

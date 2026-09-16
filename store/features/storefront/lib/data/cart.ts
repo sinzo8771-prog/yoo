@@ -5,6 +5,7 @@ import { revalidateTag } from "next/cache";
 import { gql } from "graphql-request";
 import { openfrontClient } from "../config";
 import { getAuthHeaders, getCartId, setCartId, removeCartId, setAuthToken } from "./cookies";
+import { createCartProof } from "../security/token-crypto";
 import { redirect } from "next/navigation";
 import { getUser } from "./user";
 import { Address } from "../../types/storefront";
@@ -19,11 +20,19 @@ export async function retrieveCart() {
   const cartId = await getCartId();
   if (!cartId) return null;
 
-  const { activeCart } = await openfrontClient.request(
-    CART_QUERY,
-    { cartId },
-    {}
-  );
+  let activeCart: any;
+  try {
+    ({ activeCart } = await openfrontClient.request(
+      CART_QUERY,
+      { cartId },
+      await getAuthHeaders()
+    ));
+  } catch {
+    // Expired, signed-out, or otherwise unauthorized proofs are stale browser
+    // state, not a storefront-wide rendering failure.
+    await removeCartId();
+    return null;
+  }
 
   if (!activeCart) return null;
 
@@ -537,6 +546,14 @@ export async function addToCart({ variantId, quantity, countryCode }: { variantI
   }
 
   try {
+    const headers = await getAuthHeaders();
+    // The cart resolved above is the one we are allowed to write to. When the
+    // cookie was issued earlier in this same request the proof may not be
+    // readable back yet, so mint one for the resolved cart as a fallback.
+    if (!headers["x-openfront-cart-proof"]) {
+      headers["x-openfront-cart-proof"] = createCartProof(cart.id);
+    }
+
     await openfrontClient.request(
       gql`
         mutation UpdateActiveCart($cartId: ID!, $data: CartUpdateInput!) {
@@ -561,7 +578,8 @@ export async function addToCart({ variantId, quantity, countryCode }: { variantI
             ],
           },
         },
-      }
+      },
+      headers
     );
     revalidateTag("cart");
   } catch (error) {
@@ -571,7 +589,7 @@ export async function addToCart({ variantId, quantity, countryCode }: { variantI
 }
 
 export async function updateLineItem({ lineId, quantity }: { lineId: string, quantity: number }) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
   if (!cartId) return "No cartId cookie found";
 
   try {
@@ -620,7 +638,7 @@ export async function updateLineItem({ lineId, quantity }: { lineId: string, qua
 }
 
 export async function deleteLineItem(lineId: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
   if (!cartId) return "No cart ID found";
 
   try {
@@ -653,7 +671,7 @@ export async function deleteLineItem(lineId: string) {
 }
 
 export async function updateRegion(countryCode: string, currentPath: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   // Always revalidate regions and products, and redirect - even without a cart
   revalidateTag("regions");
@@ -733,7 +751,7 @@ export async function updateCart(data: Record<string, any>) {
 }
 
 export async function cartUpdate(data: Record<string, any>) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) return "No cartId cookie found";
 
@@ -747,7 +765,7 @@ export async function cartUpdate(data: Record<string, any>) {
 }
 
 export async function applyDiscount(code: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) return "No cartId cookie found";
 
@@ -762,7 +780,7 @@ export async function applyDiscount(code: string) {
 }
 
 export async function applyGiftCard(code: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) return "No cartId cookie found";
 
@@ -777,7 +795,7 @@ export async function applyGiftCard(code: string) {
 }
 
 export async function removeDiscount(code: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) return "No cartId cookie found";
 
@@ -790,7 +808,7 @@ export async function removeDiscount(code: string) {
 }
 
 export async function removeGiftCard(code: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) return "No cartId cookie found";
 
@@ -804,7 +822,7 @@ export async function removeGiftCard(code: string) {
 }
 
 export async function submitDiscountForm(prevState: any, formData: FormData) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
   const code = formData.get("code") as string;
 
   if (!code) {
@@ -894,7 +912,7 @@ const UPDATE_CART_MUTATION = gql`
 export async function setAddresses(currentState: any, formData: FormData) {
   if (!formData) return "No form data received";
 
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
   if (!cartId) return { message: "No cartId cookie found" };
 
   const selectedAddressId = formData.get("selectedAddressId");
@@ -1164,7 +1182,7 @@ export async function setAddresses(currentState: any, formData: FormData) {
 }
 
 export async function setShippingMethod(shippingOptionId: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) throw new Error("No cartId cookie found");
 
@@ -1202,7 +1220,7 @@ export async function setShippingMethod(shippingOptionId: string) {
 }
 
 export async function setPaymentMethod(providerId: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
 
   if (!cartId) throw new Error("No cartId cookie found");
 
@@ -1216,7 +1234,7 @@ export async function setPaymentMethod(providerId: string) {
 }
 
 export async function placeOrder(paymentSessionId?: string) {
-  const cartId = (await cookies()).get("_openfront_cart_id")?.value;
+  const cartId = await getCartId();
   if (!cartId) throw new Error("No cartId cookie found");
 
   try {

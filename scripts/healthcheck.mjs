@@ -8,9 +8,12 @@
  *   node scripts/healthcheck.mjs http://host:3000 …  # checks custom endpoints
  */
 
+// This repo runs the custom storefront on 3000, so Openfront cannot claim its
+// upstream default of 3000 — it runs on 3001 (see openfront/.env PORT and
+// env-templates/store.env.example).
 const DEFAULTS = [
-  { name: "openfront", url: "http://localhost:3000/api/graphql" },
-  { name: "openship", url: "http://localhost:3001/api/graphql" },
+  { name: "openfront", url: "http://localhost:3001/api/graphql" },
+  { name: "openship", url: "http://localhost:3002/api/graphql" },
 ];
 
 const targets = process.argv.length > 2
