@@ -2,10 +2,32 @@
 
 ## Status
 
-Research only; no supplier selected, no credentials obtained, no repository or
-routing changes. Product category is NOT chosen; "phone cases" below was a test
-category for API probing only, not a product decision. All evidence was gathered
-2026-09-17 from official pages cited inline; anything not cited is unverified.
+**Selection made 2026-09-17: CJdropshipping is the provisional primary supplier.**
+This is a documentation-level decision only. No account exists, no credentials
+have been obtained, and no repository code or routing has changed. Product
+category is still NOT chosen; "phone cases" below was a test category for API
+probing only, not a product decision. All evidence was gathered 2026-09-17 from
+official pages cited inline; anything not cited is unverified.
+
+### Why CJ was selected as the "free" option
+
+Cost is the deciding factor at this stage, and both of CJ's claims below come
+from **CJ's own pages** (fetched 2026-09-17):
+
+- **No subscription.** `cjdropshipping.com/blogs/cj-news/What-is-CJdropshipping`
+  (**[F]**) lists "**No Subscription Fees – Budget Friendly**" as a headline
+  advantage, and `.../blogs/cj-news/Zendrop-or-CJdropshipping` (**[F]**) states
+  plainly: "CJdropshipping: No, CJ does not charge any monthly membership fee."
+- **Free fulfilment overhead in the US warehouse.**
+  `cjdropshipping.com/service-fee` (**[F]**, 8,986 chars) shows, for its **US
+  Warehouse** column, `Inspection Fee` Free, `Unload Fee` Free, `Inbound Fee`
+  Free across every weight band, and 90 days free storage. Its full fee tables
+  contain **no monthly or subscription line item**.
+- **Caveat: "free" means no platform fee, not zero cost.** Per-order picking and
+  shipping still apply, and the fee page says nothing about whether CJ stocks a
+  given item or at what price. CJ was chosen over Printful/Printify here purely
+  because those are print-on-demand only and would force the catalog into
+  apparel/merch.
 
 ## Candidates
 
@@ -50,11 +72,16 @@ category for API probing only, not a product decision. All evidence was gathered
 - CJ fits the general-product plan; Printful/Printify fit only if the category
   becomes print-on-demand merchandise.
 
-## Decision needed from you
-1. Product category (unblocks product-fit checks; still unspecified).
-2. Confirm CJ as the single primary supplier, or name an alternative.
-3. Whether to register for CJ sandbox/API access yourself — I cannot and will
-   not create accounts or handle credentials.
+## Decision status
+
+1. **Supplier — DECIDED (2026-09-17):** CJdropshipping is the provisional primary
+   supplier, chosen for its no-subscription model and free US-warehouse inbound
+   handling. Reversible at any time before credentials are entered.
+2. **Product category — STILL OPEN.** Needed to judge product fit and landed cost,
+   and to fix the Task 22 niche. Blocks any real sourcing.
+3. **CJ developer/sandbox registration — YOURS TO DO.** I cannot and will not
+   create accounts, accept terms, or handle credentials. Until a sandbox key is
+   entered into server-side configuration, every CJ capability stays [S]/[U].
 
 ## Next steps after decision (unchanged from Task 12 gates)
 Authenticate read-only product/inventory lookups in sandbox → implement validated

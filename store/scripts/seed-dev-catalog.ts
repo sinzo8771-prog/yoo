@@ -4,7 +4,8 @@
  * "at least three products and multiple variants"; Task 22 later supersedes
  * this with the production-shaped catalog and media.
  *
- * Safety rules (mirroring plan Task 22, Step 5):
+ * The fixture DATA lives in `./fixture/catalog-fixture.ts` (pure and testable);
+ * this script owns only the writes. Safety rules (plan Task 22, Step 5):
  *  - **idempotent**: every row we own has a deterministic `devfix_*` id and is
  *    upserted, so re-running converges instead of duplicating;
  *  - **namespaced**: we only ever write/delete ids starting with `devfix_`, so
@@ -17,151 +18,17 @@ import "dotenv/config";
 
 import { PrismaClient, type Prisma } from "../generated/openfront-db";
 
-const ID = "devfix_";
-const CURRENCY_CODE = "usd";
-const REGION_CODE = "us";
-const COUNTRY_ISO2 = "us";
-
-/** Brand-facing store record, so `/store` metadata is not the Openfront default. */
-const STORE = {
-  key: "store",
-  name: "Northwind Goods",
-  defaultCurrencyCode: CURRENCY_CODE,
-  homepageTitle: "Northwind Goods — considered objects for everyday life",
-  homepageDescription:
-    "A small catalog of solid oak, washed linen and stoneware. Prices and availability are read live from our catalog.",
-};
-
-const COUNTRY = {
-  iso2: COUNTRY_ISO2,
-  iso3: "usa",
-  numCode: 840,
-  name: "United States",
-  displayName: "United States",
-};
+import {
+  COLLECTIONS,
+  COUNTRY,
+  CURRENCY_CODE,
+  FIXTURE_ID_PREFIX as ID,
+  PRODUCTS,
+  REGION_CODE,
+  STORE,
+} from "./fixture/catalog-fixture";
 
 const prisma = new PrismaClient();
-
-type VariantSeed = {
-  /** Stable suffix, used for both the variant and its price id. */
-  key: string;
-  title: string;
-  sku: string;
-  price: number;
-  compareAmount?: number;
-  inventoryQuantity: number;
-  allowBackorder?: boolean;
-};
-
-type ProductSeed = {
-  key: string;
-  handle: string;
-  title: string;
-  subtitle: string;
-  description: string[];
-  collections: string[];
-  variants: VariantSeed[];
-};
-
-const COLLECTIONS = [
-  { key: "kitchen", handle: "dev-kitchen", title: "Kitchen" },
-  { key: "desk", handle: "dev-desk", title: "Desk" },
-] as const;
-/**
- * Deliberately covers the availability matrix, because that is the rule most
- * likely to be wrong and the one that costs money when it is:
- *  - in stock                               -> available
- *  - managed, zero stock, no backorder      -> NOT available
- *  - managed, zero stock, backorder allowed -> available
- * Also covers a discounted variant (`compareAmount`) to exercise `originalPrice`.
- */
-const PRODUCTS: ProductSeed[] = [
-  {
-    key: "oak_board",
-    handle: "dev-oak-serving-board",
-    title: "Oak Serving Board",
-    subtitle: "Hand-finished solid oak",
-    description: [
-      "A generous serving board cut from a single piece of solid oak.",
-      "Finished by hand with food-safe oil, so the grain deepens with use.",
-    ],
-    collections: ["kitchen"],
-    variants: [
-      {
-        key: "small",
-        title: "Small",
-        sku: "DEV-OAK-S",
-        price: 2400,
-        inventoryQuantity: 5,
-      },
-      {
-        key: "large",
-        title: "Large",
-        sku: "DEV-OAK-L",
-        price: 3200,
-        inventoryQuantity: 0,
-        allowBackorder: false,
-      },
-    ],
-  },
-  {
-    key: "linen_apron",
-    handle: "dev-washed-linen-apron",
-    title: "Washed Linen Apron",
-    subtitle: "Stonewashed European linen",
-    description: [
-      "A cross-back apron in stonewashed linen that softens with every wash.",
-      "Adjustable at the waist, with no ties to knot behind your neck.",
-    ],
-    collections: ["kitchen", "desk"],
-    variants: [
-      {
-        key: "one_size",
-        title: "One size",
-        sku: "DEV-APRON-OS",
-        price: 4800,
-        inventoryQuantity: 12,
-      },
-      {
-        key: "tall",
-        title: "Tall",
-        sku: "DEV-APRON-T",
-        price: 5200,
-        inventoryQuantity: 0,
-        allowBackorder: true,
-      },
-    ],
-  },
-  {
-    key: "stoneware_mug",
-    handle: "dev-stoneware-mug",
-    title: "Stoneware Mug",
-    subtitle: "Reactive glaze, dishwasher safe",
-    description: [
-      "Thrown in small batches and glazed with a reactive finish, so no two are identical.",
-      "Holds heat well, and is safe in both the dishwasher and the microwave.",
-    ],
-    collections: ["desk"],
-    variants: [
-      {
-        key: "250ml",
-        title: "250ml",
-        sku: "DEV-MUG-250",
-        price: 1800,
-        compareAmount: 2200,
-        inventoryQuantity: 30,
-      },
-      {
-        key: "400ml",
-        title: "400ml",
-        sku: "DEV-MUG-400",
-        price: 2100,
-        inventoryQuantity: 8,
-      },
-    ],
-  },
-];
-
 /** Keystone `document` fields are stored as an array of block nodes. */
 function toDocument(paragraphs: string[]): Prisma.InputJsonValue {
   return paragraphs.map((text) => ({
