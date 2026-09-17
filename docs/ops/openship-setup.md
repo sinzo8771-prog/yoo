@@ -2,11 +2,11 @@
 
 ## Status
 
-Implemented the internal transport, staged channel provisioning (`ensureLocalChannel`),
-`stageLink` for linking them, and `stageMatch` for exact variant mappings. Task 10 is
-**not complete**: the Openfront source shop is not provisioned by these operations,
-and live authenticated validation has not been run. No live records, webhooks, orders,
-or provider credentials were changed during this work.
+Implemented the internal transport, staged provisioning for the Openfront source shop
+(`ensureSourceShop`) and the fulfillment channel (`ensureLocalChannel`), `stageLink`
+for linking them, and `stageMatch` for exact variant mappings. Task 10 is
+**not complete**: live authenticated validation has not been run. No live records,
+webhooks, orders, or provider credentials were changed during this work.
 
 ## Internal API
 
@@ -16,8 +16,9 @@ stage the link:
 
 ```ts
 const request = createOpenShipTransport({ url: process.env.OPENSHIP_GRAPHQL_URL!, token: process.env.OPENSHIP_API_TOKEN! });
+const shop = await ensureSourceShop(request, { ownerId, name: "openfront-orders" });
 const channel = await ensureLocalChannel(request, { ownerId, name: "local-test-supplier" });
-const link = await stageLink(request, { ownerId, shopId, channelId: channel.id });
+const link = await stageLink(request, { ownerId, shopId: shop.id, channelId: channel.id });
 const match = await stageMatch(request, {
   ownerId, shopId, channelId: channel.id,
   source: { productId: "prod_1", variantId: "var_1" },      // Openfront variant
@@ -35,8 +36,8 @@ rejects browser execution; it does not provide endpoint authorization for caller
   storefront 3000 and Openfront 3001, unlike the older root README defaults.
 - Token must be an OpenShip `osp_` API key sent as `Authorization: Bearer ...`.
   Use a dedicated non-admin test operator. Scopes used by these operations:
-  `read_shops`, `read_channels`, `write_channels`, `read_links`, `write_links`,
-  `read_matches`, `write_matches` (verified against
+  `read_shops`, `write_shops`, `read_channels`, `write_channels`, `read_links`,
+  `write_links`, `read_matches`, `write_matches` (verified against
   `openship/features/keystone/lib/api-key-scopes.ts`).
   These are not a claim that every nested resolver enforces scopes uniformly.
 - `ownerId` must equal the authenticated user's ID and both resource owners.
@@ -72,6 +73,12 @@ item, unit quantities); any mismatch surfaces as "inspect state before retrying"
 and requires manual reconciliation. The server-side Match hook also dedupes items;
 staging sends exactly one item per side regardless.
 
+`ensureSourceShop` reuses or creates the single named source shop (sequential link
+mode, no platform, domain, or credentials). A ShopPlatform row cannot exist without
+every adapter function, so staging never attaches a platform to the shop either.
+Like the channel operation, it fails without writing when several same-name shops
+exist.
+
 Run setup serially with a single operator writer. There is no unique database
 constraint for a shop/channel pair, so simultaneous processes or dashboard writes
 can race the read-before-create check. This is **sequential repeat safety**, not
@@ -91,10 +98,10 @@ The setup tests execute queries/mutations against the pinned generated schema at
 `c:\Users\lenovo\Desktop\yoo\openship\schema.graphql` with in-memory resolvers.
 The reference clone must exist. These tests validate GraphQL names/types and setup
 behavior, **not** live Keystone auth, hooks, database concurrency, or fulfillment.
-Latest unit run: 155 passing (27 OpenShip tests: transport 2, stageLink 7,
-ensureLocalChannel 2, stageMatch 16). Typecheck still fails on existing project
-diagnostics (193, all pre-existing in the vendored `features/` tree); none are in
-the OpenShip files. `npm run build` exits 0.
+Latest unit run: 161 passing (33 OpenShip tests: transport 2, stageLink 7,
+ensureLocalChannel 2, stageMatch 16, ensureSourceShop 6). Typecheck still fails on
+existing project diagnostics (193, all pre-existing in the vendored `features/` tree);
+none are in the OpenShip files. `npm run build` exits 0.
 
 ## Rollback and activation
 
@@ -109,6 +116,5 @@ Do not activate routing as part of this task slice. Before activation: implement
 and validate Task 11's synthetic adapter; complete exact variant mapping and
 reject title-only matches; test routing and retries in isolation. Do not attach
 production credentials. Settled-payment validation for Task 9 remains separate.
-Remaining Task 10 work: Openfront source-shop provisioning (for example
-`ensureSourceShop`) and live authenticated validation against a running OpenShip
+Remaining Task 10 work: live authenticated validation against a running OpenShip
 with real `osp_` credentials.

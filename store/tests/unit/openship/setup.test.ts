@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { buildSchema, graphql } from "graphql";
 import { describe, expect, it } from "vitest";
-import { stageLink, stageMatch, ensureLocalChannel } from "@/lib/openship/setup";
+import { stageLink, stageMatch, ensureLocalChannel, ensureSourceShop } from "@/lib/openship/setup";
 import type { OpenShipRequest } from "@/lib/openship/transport";
 
 // Execute the public operation against the pinned generated GraphQL contract.
@@ -16,9 +16,11 @@ function fixture() {
   const shopItems: any[] = [];
   const channelItems: any[] = [];
   const matches: any[] = [];
+  const shops: any[] = [];
   let creates = 0;
   let channelCreates = 0;
   let matchCreates = 0;
+  let shopCreates = 0;
   const owner = { id: "operator" };
   const rootValue = {
     authenticatedItem: () => ({ __typename: "User", id: "operator" }),
@@ -38,6 +40,19 @@ function fixture() {
       const channel = { id: `channel-${channelCreates}`, name: data.name, domain: data.domain ?? null };
       channels.push(channel);
       return channel;
+    },
+    shops: ({ where }: { where?: any }) => {
+      const name = where?.name?.equals;
+      return shops.filter(shop => !name || shop.name === name);
+    },
+    createShop: ({ data }: { data: any }) => {
+      shopCreates++;
+      const shop = {
+        id: `shop-${shopCreates}`, name: data.name,
+        domain: data.domain ?? null, linkMode: data.linkMode ?? "sequential",
+      };
+      shops.push(shop);
+      return shop;
     },
     matches: ({ where }: { where?: any }) => {
       const conditions: any[] = where?.AND ?? [];
@@ -106,7 +121,7 @@ function fixture() {
     if (result.errors) throw new Error(result.errors.map(error => error.message).join("; "));
     return result.data as T;
   };
-  return { request, links, channels, matches, rootValue, creates: () => creates, channelCreates: () => channelCreates, matchCreates: () => matchCreates };
+  return { request, links, channels, matches, shops, rootValue, creates: () => creates, channelCreates: () => channelCreates, matchCreates: () => matchCreates, shopCreates: () => shopCreates };
 }
 
 describe("stageLink", () => {
@@ -169,6 +184,46 @@ describe("ensureLocalChannel", () => {
     expect(f.channels[0]).toMatchObject({ name: "local-test-supplier", domain: null });
     expect("platform" in f.channels[0]).toBe(false);
     expect("accessToken" in f.channels[0]).toBe(false);
+  });
+});
+
+describe("ensureSourceShop", () => {
+  const input = { ownerId: "operator", name: "openfront-orders" };
+
+  it("reuses the named shop and never duplicates it on a repeat", async () => {
+    const f = fixture();
+    f.shops.push({ id: "shop", name: "openfront-orders", linkMode: "sequential", domain: null });
+    await expect(ensureSourceShop(f.request, input)).resolves.toEqual({ id: "shop", created: false });
+    await expect(ensureSourceShop(f.request, input)).resolves.toEqual({ id: "shop", created: false });
+    expect(f.shopCreates()).toBe(0);
+  });
+
+  it("creates one sequential shop with no platform or credentials", async () => {
+    const f = fixture();
+    f.rootValue.shops = () => [];
+    await expect(ensureSourceShop(f.request, input)).resolves.toEqual({ id: "shop-1", created: true });
+    expect(f.shopCreates()).toBe(1);
+    expect(f.shops[0]).toMatchObject({ name: "openfront-orders", linkMode: "sequential", domain: null });
+    expect("platform" in f.shops[0]).toBe(false);
+    expect("accessToken" in f.shops[0]).toBe(false);
+    expect("refreshToken" in f.shops[0]).toBe(false);
+  });
+
+  it("rejects multiple shops sharing the name without writing", async () => {
+    const f = fixture();
+    f.shops.push(
+      { id: "s1", name: "openfront-orders", linkMode: "sequential" },
+      { id: "s2", name: "openfront-orders", linkMode: "sequential" },
+    );
+    await expect(ensureSourceShop(f.request, input)).rejects.toThrow("Multiple shops share this name");
+    expect(f.shopCreates()).toBe(0);
+  });
+
+  it.each(["-leading-dash", " spaced ", ""])("rejects the invalid name %j without writing", async (name) => {
+    const f = fixture();
+    await expect(ensureSourceShop(f.request, { ownerId: "operator", name }))
+      .rejects.toThrow();
+    expect(f.shopCreates()).toBe(0);
   });
 });
 

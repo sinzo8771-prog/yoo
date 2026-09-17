@@ -74,7 +74,7 @@ export async function stageLink(request: OpenShipRequest, input: {
   return { id: result.createLink.id, created: true, routingEnabled: false };
 }
 
-const CHANNEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,99}$/;
+const RESOURCE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,99}$/;
 
 /**
  * Reuse or create the single named local channel that Task 11 will turn into a
@@ -88,7 +88,7 @@ export async function ensureLocalChannel(
   input: { ownerId: string; name: string },
 ): Promise<{ id: string; created: boolean }> {
   if (typeof input.ownerId !== "string" || !input.ownerId.trim() ||
-      typeof input.name !== "string" || !CHANNEL_NAME_PATTERN.test(input.name)) {
+      typeof input.name !== "string" || !RESOURCE_NAME_PATTERN.test(input.name)) {
     throw new Error("Owner ID and a valid channel name are required.");
   }
   const state = await request<{
@@ -116,6 +116,49 @@ export async function ensureLocalChannel(
     throw new Error("OpenShip channel provisioning could not be verified; inspect state before retrying.");
   }
   return { id: result.createChannel.id, created: true };
+}
+
+/**
+ * Reuse or create the single named Openfront source shop (Shop = order source).
+ * Creates a shop with sequential link mode and no platform, domain, or access
+ * token — staging never attaches credentials or adapters, and ShopPlatform rows
+ * cannot exist without all adapter functions. Sequential repeats are safe;
+ * callers must serialize provisioning across processes. Ambiguous matches
+ * (multiple same-name shops) fail without writing.
+ */
+export async function ensureSourceShop(
+  request: OpenShipRequest,
+  input: { ownerId: string; name: string },
+): Promise<{ id: string; created: boolean }> {
+  if (typeof input.ownerId !== "string" || !input.ownerId.trim() ||
+      typeof input.name !== "string" || !RESOURCE_NAME_PATTERN.test(input.name)) {
+    throw new Error("Owner ID and a valid shop name are required.");
+  }
+  const state = await request<{
+    authenticatedItem: { id: string } | null;
+    shops: { id: string }[] | null;
+  }>(`query EnsureSourceShop($name: String!) {
+    authenticatedItem { ... on User { id } }
+    shops(where: { name: { equals: $name } }) { id }
+  }`, { name: input.name });
+  if (state.authenticatedItem?.id !== input.ownerId) {
+    throw new Error("OpenShip ownership check failed.");
+  }
+  if (!Array.isArray(state.shops)) throw new Error("OpenShip returned invalid shop data.");
+  if (state.shops.length > 1) {
+    throw new Error("Multiple shops share this name; resolve the conflict before provisioning.");
+  }
+  if (state.shops.length === 1) {
+    return { id: state.shops[0].id, created: false };
+  }
+  const result = await request<{ createShop: { id: string; name: string | null } | null }>(
+    `mutation EnsureSourceShop($data: ShopCreateInput!) { createShop(data: $data) { id name } }`,
+    { data: { name: input.name, linkMode: "sequential" } },
+  );
+  if (!result.createShop || result.createShop.name !== input.name) {
+    throw new Error("OpenShip shop provisioning could not be verified; inspect state before retrying.");
+  }
+  return { id: result.createShop.id, created: true };
 }
 
 type ItemRef = { productId: string; variantId: string };
