@@ -666,23 +666,23 @@ Link = Shop -> Channel
 Match = Openfront variant -> Supplier/Channel variant
 ```
 
-- [ ] **Step 1: Configure the Openfront shop source.**
+- [x] **Step 1: Configure the Openfront shop source.**
 
 Use scoped credentials and owner checks as supported by the current OpenShip revision.
 
-- [ ] **Step 2: Configure the fulfillment channel.**
+- [x] **Step 2: Configure the fulfillment channel.**
 
 Use a real provider adapter only after its contract is verified; otherwise start with a synthetic/local channel.
 
-- [ ] **Step 3: Create the shop-channel link.**
+- [x] **Step 3: Create the shop-channel link.**
 
 Prevent duplicate links unless the OpenShip contract explicitly supports multiple routing destinations with deterministic priority.
 
-- [ ] **Step 4: Create exact product matches.**
+- [x] **Step 4: Create exact product matches.**
 
 Match at variant level, not merely by title. Store a deterministic mapping from storefront SKU/variant to supplier SKU/variant.
 
-- [ ] **Step 5: Write operator setup documentation.**
+- [x] **Step 5: Write operator setup documentation.**
 
 Document every required credential, scope, match rule, test command, and rollback procedure.
 
