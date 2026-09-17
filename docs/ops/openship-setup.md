@@ -85,6 +85,25 @@ can race the read-before-create check. This is **sequential repeat safety**, not
 atomic or distributed idempotency. No mutation is retried automatically. On a
 network error or unverified mutation result, inspect records before retrying.
 
+## Activating the synthetic channel (Task 11)
+
+The deterministic synthetic adapter lives in
+`c:\Users\lenovo\Desktop\yoo\store\integrations\synthetic-channel\synthetic.ts`.
+It implements the pinned channel contract called by OpenShip's
+`executeChannelAdapterFunction`: `createPurchaseFunction({ platform, cartItems,
+shipping, notes, idempotencyKey })` plus the tracking webhook handler and the
+remaining ChannelPlatform fields. To integrate: copy the module into the OpenShip
+checkout at `openship/features/integrations/channel/synthetic.ts` (that
+repository is separate and git-ignored here) and create a ChannelPlatform row
+named `synthetic` whose ten adapter-function fields all reference `synthetic`,
+then attach it to the staged channel. Behavior: purchases are accepted only for
+`syn_`-prefixed SKUs with positive integer quantities; purchase IDs and tracking
+numbers are SHA-256-derived and stable; re-submitting the same order returns the
+same purchase; `fulfillPurchase` is the explicit tracking transition; cancelled
+purchases cannot be fulfilled and vice versa. State is in-memory per process —
+this is a fixture for isolated routing tests, never a production provider.
+
+
 ## Verification
 
 From `c:\Users\lenovo\Desktop\yoo\store`:
