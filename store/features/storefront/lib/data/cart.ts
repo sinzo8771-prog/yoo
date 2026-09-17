@@ -6,6 +6,8 @@ import { gql } from "graphql-request";
 import { openfrontClient } from "../config";
 import { getAuthHeaders, getCartId, setCartId, removeCartId, setAuthToken } from "./cookies";
 import { createCartProof } from "../security/token-crypto";
+import { buildOrderConfirmationPath } from "../security/redirects";
+import { CheckoutUnavailableError } from "../security/checkout-errors";
 import { redirect } from "next/navigation";
 import { getUser } from "./user";
 import { Address } from "../../types/storefront";
@@ -1233,12 +1235,66 @@ export async function setPaymentMethod(providerId: string) {
   }
 }
 
-export async function placeOrder(paymentSessionId?: string) {
-  const cartId = await getCartId();
-  if (!cartId) throw new Error("No cartId cookie found");
+/**
+ * Raised when checkout cannot proceed for a reason the customer can act on
+ * (or must be told about honestly). Never fabricated as success.
+ *
+ * Defined in `../security/checkout-errors` — a "use server" module may only
+ * export async functions, so the class itself lives in a plain module.
+ */
 
+export async function placeOrder(paymentSessionId?: string) {
   try {
-    const { completeActiveCart } = await openfrontClient.request(
+    return await completeOrder(paymentSessionId);
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof CheckoutUnavailableError
+        ? error.message
+        : "We couldn't confirm your order or payment status. Contact support before trying again.",
+    };
+  }
+}
+
+async function completeOrder(paymentSessionId?: string) {
+  const cartId = await getCartId();
+  if (!cartId) {
+    throw new CheckoutUnavailableError(
+      "Your session expired. Please return to your cart and try again."
+    );
+  }
+
+  // Task 9, Step 2 — re-read cart state so prices, currency, and line items
+  // are current before completion; a stale/expired cart must fail loudly
+  // instead of silently completing against old assumptions.
+  let freshCart: any;
+  try {
+    freshCart = await getCart(cartId);
+  } catch {
+    throw new CheckoutUnavailableError(
+      "We couldn't verify your cart. Please refresh the page and try again."
+    );
+  }
+  if (!freshCart) {
+    throw new CheckoutUnavailableError(
+      "Your cart is no longer available. Please start a new order."
+    );
+  }
+  const lineItems: any[] = freshCart.lineItems ?? [];
+  if (lineItems.length === 0) {
+    throw new CheckoutUnavailableError(
+      "Your cart is empty. Add items before placing an order."
+    );
+  }
+  if (!freshCart.region?.currency?.code) {
+    throw new CheckoutUnavailableError(
+      "Your cart's currency could not be confirmed. Please refresh and try again."
+    );
+  }
+
+  let completeActiveCart: any;
+  try {
+    const result = await openfrontClient.request(
       gql`
         mutation CompleteActiveCart($cartId: ID!, $paymentSessionId: ID) {
           completeActiveCart(cartId: $cartId, paymentSessionId: $paymentSessionId)
@@ -1247,33 +1303,64 @@ export async function placeOrder(paymentSessionId?: string) {
       {
         cartId,
         paymentSessionId,
-      }
+      },
+      // Task 9, Step 1 — the backend's assertCartAccess requires the signed
+      // cart proof (guest) or session bearer token; without these headers the
+      // mutation fails with "Cart not found".
+      await getAuthHeaders()
     );
-
-    if (completeActiveCart?.id) {
-      // Remove cart cookie after successful order
-      await removeCartId();
-      revalidateTag("cart");
-
-      // Return redirect info for client-side redirect
-      const countryCode = completeActiveCart.shippingAddress?.country?.iso2?.toLowerCase();
-      if (!countryCode) {
-        throw new Error("No country code found in completed order");
-      }
-
-      // Add secretKey to URL if it exists (for non-logged-in users)
-      const secretKeyParam = completeActiveCart.secretKey ?
-        `?secretKey=${completeActiveCart.secretKey}` : '';
-
-      return {
-        success: true,
-        redirectTo: `/${countryCode}/order/confirmed/${completeActiveCart.id}${secretKeyParam}`
-      };
-    }
-
-    return completeActiveCart;
+    completeActiveCart = result.completeActiveCart;
   } catch (error) {
-    console.error("Error placing order:", error);
-    throw error;
+    // Task 9, Step 4 — surface unavailable checkout capability honestly.
+    const raw = error instanceof Error ? error.message : String(error);
+    console.error("Checkout completion failed");
+    if (/Manual tender/i.test(raw)) {
+      throw new CheckoutUnavailableError(
+        "This payment method cannot be used for online checkout. Please choose another payment method."
+      );
+    }
+    if (/payment provider reference|payment status|payment was not/i.test(raw)) {
+      throw new CheckoutUnavailableError(
+        "We couldn't confirm your payment. Check your payment status or contact support before trying again."
+      );
+    }
+    if (/already posted to a different account/i.test(raw)) {
+      throw new CheckoutUnavailableError(
+        "This cart belongs to a different account. Please sign in with the account that created it."
+      );
+    }
+    throw new CheckoutUnavailableError(
+      "Checkout is currently unavailable. We couldn't confirm your order or payment status. Contact support before trying again."
+    );
   }
+
+  if (!completeActiveCart?.id) {
+    // A missing order id is not proof that payment or order creation failed.
+    throw new CheckoutUnavailableError(
+      "We couldn't confirm your order. Check your payment status or contact support before trying again."
+    );
+  }
+
+  // Remove cart cookie after successful order
+  await removeCartId();
+  revalidateTag("cart");
+
+  // Task 9, Step 3 — redirect is a locked internal path built from validated
+  // server-side fields only; a malformed country/id/secret never redirects.
+  const countryCode = completeActiveCart.shippingAddress?.country?.iso2?.toLowerCase();
+  const redirectTo = buildOrderConfirmationPath(
+    countryCode,
+    completeActiveCart.id,
+    completeActiveCart.secretKey || null
+  );
+  if (!redirectTo) {
+    throw new CheckoutUnavailableError(
+      "Your order was placed, but the confirmation page could not be opened. Check your orders in your account."
+    );
+  }
+
+  return {
+    success: true as const,
+    redirectTo,
+  };
 }

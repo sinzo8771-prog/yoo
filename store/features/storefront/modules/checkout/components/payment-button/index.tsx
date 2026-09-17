@@ -2,6 +2,7 @@
 
 import { isManual, isStripe, isPaypal } from "@/features/storefront/lib/constants"
 import { placeOrder } from "@/features/storefront/lib/data/cart"
+import { assertSafeInternalPath } from "@/features/storefront/lib/security/redirects"
 import { Button } from "@/components/ui/button"
 import { useElements, useStripe } from "@stripe/react-stripe-js"
 import { PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js"
@@ -91,8 +92,13 @@ const StripePaymentButton: React.FC<StripePaymentButtonProps> = ({
   const onPaymentCompleted = async (paymentSessionId: string) => {
     try {
       const result = await placeOrder(paymentSessionId)
+      if (!result.success) {
+        setErrorMessage(result.error)
+        return
+      }
+
       if (result && typeof result === 'object' && 'success' in result && result.success && 'redirectTo' in result) {
-        router.push(result.redirectTo as string)
+        router.push(assertSafeInternalPath(result.redirectTo as string))
       }
     } catch (err: any) {
       console.error('Payment error:', err);
@@ -190,8 +196,13 @@ const ManualTestPaymentButton = ({ notReady, cart, "data-testid": dataTestId }: 
   const onPaymentCompleted = async (paymentSessionId?: string) => {
     try {
       const result = await placeOrder(paymentSessionId)
+      if (!result.success) {
+        setErrorMessage(result.error)
+        return
+      }
+
       if (result && typeof result === 'object' && 'success' in result && result.success && 'redirectTo' in result) {
-        router.push(result.redirectTo as string)
+        router.push(assertSafeInternalPath(result.redirectTo as string))
       }
     } catch (err: any) {
       setErrorMessage(err.message)
@@ -254,8 +265,13 @@ const PayPalPaymentButton: React.FC<PayPalPaymentButtonProps> = ({
   const onPaymentCompleted = async (paymentSessionId: string) => {
     try {
       const result = await placeOrder(paymentSessionId)
+      if (!result.success) {
+        setErrorMessage(result.error)
+        return
+      }
+
       if (result && typeof result === 'object' && 'success' in result && result.success && 'redirectTo' in result) {
-        router.push(result.redirectTo as string)
+        router.push(assertSafeInternalPath(result.redirectTo as string))
       }
     } catch (err: any) {
       console.error('Payment error:', err);

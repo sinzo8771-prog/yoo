@@ -169,8 +169,19 @@ describe("getOrSetCart stale-cart handling (Task 7, Step 1)", () => {
   });
 });
 
-describe("placeOrder redirect URL construction (Task 7, Step 2)", () => {
+describe("placeOrder redirect URL construction (Task 7, Step 2; updated by Task 9)", () => {
+  /** Seed the fresh-cart re-read placeOrder performs before completion. */
+  const mockFreshCart = () =>
+    requestMock.mockImplementationOnce(async () => ({
+      activeCart: {
+        id: "test-cart",
+        region: { currency: { code: "USD" } },
+        lineItems: [{ id: "li_1", quantity: 1 }],
+      },
+    }));
+
   it("builds the correct confirmation redirect with secretKey for guest orders", async () => {
+    mockFreshCart();
     requestMock.mockResolvedValueOnce({
       completeActiveCart: {
         id: "order_123",
@@ -188,12 +199,14 @@ describe("placeOrder redirect URL construction (Task 7, Step 2)", () => {
     const result = await placeOrder();
 
     expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
     expect(result.redirectTo).toBe(
       "/us/order/confirmed/order_123?secretKey=secret_key_abc"
     );
   });
 
   it("builds redirect without secretKey for logged-in orders", async () => {
+    mockFreshCart();
     requestMock.mockResolvedValueOnce({
       completeActiveCart: {
         id: "order_456",
@@ -211,24 +224,30 @@ describe("placeOrder redirect URL construction (Task 7, Step 2)", () => {
     const result = await placeOrder();
 
     expect(result.success).toBe(true);
+    if (!result.success) throw new Error(result.error);
     expect(result.redirectTo).toBe("/us/order/confirmed/order_456");
     // Cart cookie should be cleared after successful order
     expect(await getCartId()).toBeUndefined();
   });
 
-  it("throws when cart cookie is missing", async () => {
-    await expect(placeOrder()).rejects.toThrow("No cartId cookie found");
+  it("throws a customer-actionable error when cart cookie is missing (Task 9)", async () => {
+    await expect(placeOrder()).resolves.toMatchObject({
+      success: false,
+      error: "Your session expired. Please return to your cart and try again.",
+    });
   });
 
-  it("returns null (no redirect) when completed order has no id", async () => {
+  it("throws when the completed order has no id (Task 9 — never fabricates success)", async () => {
+    mockFreshCart();
     requestMock.mockResolvedValueOnce({
       completeActiveCart: null,
     });
 
     await setCartId("test-cart");
 
-    const result = await placeOrder();
-
-    expect(result).toBeNull();
+    await expect(placeOrder()).resolves.toMatchObject({
+      success: false, error: expect.stringContaining("We couldn't confirm your order"),
+    });
+    expect(await getCartId()).toBe("test-cart");
   });
 });
