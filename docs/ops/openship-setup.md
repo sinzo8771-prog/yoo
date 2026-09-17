@@ -1,0 +1,114 @@
+# OpenShip setup — Task 10 partial implementation
+
+## Status
+
+Implemented the internal transport, staged channel provisioning (`ensureLocalChannel`),
+`stageLink` for linking them, and `stageMatch` for exact variant mappings. Task 10 is
+**not complete**: the Openfront source shop is not provisioned by these operations,
+and live authenticated validation has not been run. No live records, webhooks, orders,
+or provider credentials were changed during this work.
+
+## Internal API
+
+Implementation directory: `c:\Users\lenovo\Desktop\yoo\store\lib\openship`.
+From operator-side Node code: create the transport, provision the destination, then
+stage the link:
+
+```ts
+const request = createOpenShipTransport({ url: process.env.OPENSHIP_GRAPHQL_URL!, token: process.env.OPENSHIP_API_TOKEN! });
+const channel = await ensureLocalChannel(request, { ownerId, name: "local-test-supplier" });
+const link = await stageLink(request, { ownerId, shopId, channelId: channel.id });
+const match = await stageMatch(request, {
+  ownerId, shopId, channelId: channel.id,
+  source: { productId: "prod_1", variantId: "var_1" },      // Openfront variant
+  target: { productId: "sup_prod_1", variantId: "sup_var_1" }, // supplier variant
+});
+```
+
+Do not expose these functions as public server actions or routes. The transport
+rejects browser execution; it does not provide endpoint authorization for callers.
+
+- Supply `OPENSHIP_GRAPHQL_URL` and `OPENSHIP_API_TOKEN` through server environment
+  configuration only. There is no implicit endpoint or credential fallback.
+- URL must use HTTPS, except HTTP on literal loopback hosts for local development.
+  Redirects are rejected. Check actual port assignments: current checkout uses
+  storefront 3000 and Openfront 3001, unlike the older root README defaults.
+- Token must be an OpenShip `osp_` API key sent as `Authorization: Bearer ...`.
+  Use a dedicated non-admin test operator. Scopes used by these operations:
+  `read_shops`, `read_channels`, `write_channels`, `read_links`, `write_links`,
+  `read_matches`, `write_matches` (verified against
+  `openship/features/keystone/lib/api-key-scopes.ts`).
+  These are not a claim that every nested resolver enforces scopes uniformly.
+- `ownerId` must equal the authenticated user's ID and both resource owners.
+  The backend remains responsible for authorization and relationship visibility.
+- Shop must use sequential linking. The staged channel must have **no platform
+  attached** — no credentials and no adapter. Task 11 adds the synthetic
+  ChannelPlatform later; never attach a real purchase adapter for staging.
+
+## Staging and repeat behavior
+
+A staged link uses `filters: [{ field: "id", type: "in", value: [] }]` and an empty
+`customWhere`. In the pinned Link resolver this becomes `{ id: { in: [] } }`.
+The Order hook ANDs it with the new order ID, so it cannot match an order.
+Empty filters instead mean **match all**: never clear them to "disable" a link.
+There is no `orderID` or enabled flag on Link in this revision.
+
+The operation reuses one identical staged link and rejects different destinations,
+active filters, foreign ownership, and multiple existing links. It does not call
+order, purchase, tracking, webhook, or adapter operations. A staging result is
+not evidence of fulfillment or of end-to-end routing.
+
+`stageMatch` stages one exact source-variant → supplier-variant mapping as a Match
+with exactly one ShopItem (input) and one ChannelItem (output). It accepts product
+and variant IDs only — never titles — so every staged match is an exact 1:1 match;
+title-only or fuzzy matches cannot be expressed through it. It reuses an identical
+existing match (`created: false`), and without writing rejects: a source variant
+already mapped to a different supplier variant, on this or any other channel;
+source variants appearing in multiple matches or inside bundle (multi-item)
+matches; blank/missing IDs; identical source and target; non-sequential shops;
+foreign ownership; and channels with a platform attached. Both the reuse lookup
+and the create response are verified field by field (owner, source item, destination
+item, unit quantities); any mismatch surfaces as "inspect state before retrying"
+and requires manual reconciliation. The server-side Match hook also dedupes items;
+staging sends exactly one item per side regardless.
+
+Run setup serially with a single operator writer. There is no unique database
+constraint for a shop/channel pair, so simultaneous processes or dashboard writes
+can race the read-before-create check. This is **sequential repeat safety**, not
+atomic or distributed idempotency. No mutation is retried automatically. On a
+network error or unverified mutation result, inspect records before retrying.
+
+## Verification
+
+From `c:\Users\lenovo\Desktop\yoo\store`:
+
+```powershell
+npm test -- tests/unit/openship
+npm test
+```
+
+The setup tests execute queries/mutations against the pinned generated schema at
+`c:\Users\lenovo\Desktop\yoo\openship\schema.graphql` with in-memory resolvers.
+The reference clone must exist. These tests validate GraphQL names/types and setup
+behavior, **not** live Keystone auth, hooks, database concurrency, or fulfillment.
+Latest unit run: 155 passing (27 OpenShip tests: transport 2, stageLink 7,
+ensureLocalChannel 2, stageMatch 16). Typecheck still fails on existing project
+diagnostics (193, all pre-existing in the vendored `features/` tree); none are in
+the OpenShip files. `npm run build` exits 0.
+
+## Rollback and activation
+
+Record the returned link and match IDs with their `created` flags. For rollback,
+delete exactly the staged link (never bulk-delete shop links or delete a reused
+link). Deleting a Match removes only the mapping; its input ShopItems and output
+ChannelItems also need explicit deletion, so reconcile by source variant ID before
+retrying after a lost response. Revoking an API key does not remove any stored link
+or match.
+
+Do not activate routing as part of this task slice. Before activation: implement
+and validate Task 11's synthetic adapter; complete exact variant mapping and
+reject title-only matches; test routing and retries in isolation. Do not attach
+production credentials. Settled-payment validation for Task 9 remains separate.
+Remaining Task 10 work: Openfront source-shop provisioning (for example
+`ensureSourceShop`) and live authenticated validation against a running OpenShip
+with real `osp_` credentials.
