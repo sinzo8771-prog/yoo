@@ -719,15 +719,15 @@ cancelPurchase(input: { purchaseId: string }): Promise<CancelResult>;
 
 Use actual adapter contracts from the checked-out OpenShip revision rather than copying these illustrative types verbatim.
 
-- [ ] **Step 1: Implement deterministic synthetic behavior.**
+- [x] **Step 1: Implement deterministic synthetic behavior.**
 
 The fixture should accept known SKUs, reject unknown SKUs, expose deterministic purchase IDs, and emit deterministic tracking numbers after an explicit state transition.
 
-- [ ] **Step 2: Implement idempotency tests.**
+- [x] **Step 2: Implement idempotency tests.**
 
 Submitting the same external order twice must not create two purchases.
 
-- [ ] **Step 3: Implement failure tests.**
+- [x] **Step 3: Implement failure tests.**
 
 Cover timeout, malformed response, provider rejection, duplicate callback, and cancellation after fulfillment.
 
