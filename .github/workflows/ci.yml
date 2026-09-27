@@ -200,6 +200,10 @@ jobs:
           cache: npm
           cache-dependency-path: store/package-lock.json
       - run: npm ci
-      # Fails on any high-or-worse advisory. `npm audit` reads the public
-      # registry, not a credential, so this job stays secret-free.
-      - run: npm run audit:deps
+      # Fails on any *new* high-or-worse advisory (scripts/audit-gate.ts against
+      # the reviewed scripts/audit-allowlist.json). Raw `npm audit
+      # --audit-level=high` (`npm run audit:deps`) is red on this tree by design —
+      # Task 18 recorded 64 findings that cannot be fixed from here — and a job
+      # that is always red gets ignored. `npm audit` reads the public registry,
+      # not a credential, so this job stays secret-free.
+      - run: npm run audit:ci

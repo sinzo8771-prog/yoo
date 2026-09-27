@@ -1,14 +1,35 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
-import { POST } from "../../../../openship/app/api/handlers/shop/create-order/[shopId]/route";
-import { deriveOpenFrontShopWebhookSecret } from "../../../../openship/features/integrations/shop/openfront-webhook-security";
 import { state } from "../../stubs/openship-keystone-context";
+import type { ReferenceClone } from "@/scripts/reference-clones";
+import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/reference-clones";
 
 // Task 13 Step 2 harness (route level): the REAL pinned ingestion route runs
 // with only the database faked. The executor's dynamic import loads the real
 // openfront.ts adapter (signature verification happens there, against the shop
 // row the route looked up), so the replay/dedupe semantics below exercise the
 // pinned create-order handler, not a copy.
+//
+// Task 23 (CI follow-up): the route and the webhook-security helper live in
+// `../openship/`, one of the gitignored reference clones, so they are imported
+// in `beforeAll` and this suite skips when that clone is not checked out. The
+// `typeof import(...)` annotations keep every call site type-checked wherever
+// the clone *is* checked out.
+
+const clone: ReferenceClone = "openship";
+const cloneMissing = referenceCloneMissing(clone);
+noteMissingReferenceClone(clone);
+
+let POST: typeof import("../../../../openship/app/api/handlers/shop/create-order/[shopId]/route")["POST"];
+let deriveOpenFrontShopWebhookSecret: typeof import("../../../../openship/features/integrations/shop/openfront-webhook-security")["deriveOpenFrontShopWebhookSecret"];
+
+beforeAll(async () => {
+  if (cloneMissing) return;
+  ({ POST } = await import("../../../../openship/app/api/handlers/shop/create-order/[shopId]/route"));
+  ({ deriveOpenFrontShopWebhookSecret } = await import(
+    "../../../../openship/features/integrations/shop/openfront-webhook-security"
+  ));
+});
 
 const SHOP = {
   id: "shop-1", domain: "http://openfront.test", accessToken: "tok",
@@ -106,7 +127,7 @@ beforeEach(() => {
   state.query = {};
 });
 
-describe("create-order route ingestion (Task 13 step 2, route level)", () => {
+describe.skipIf(cloneMissing)("create-order route ingestion (Task 13 step 2, route level)", () => {
   it("ingests a signed order end to end, preserving the source orderId", async () => {
     const f = fixture();
     state.query = f.query;

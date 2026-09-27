@@ -1441,8 +1441,9 @@ Delivered controls:
   `StructuredProductData.tsx` (`toJsonLdString`), `getStore()`
   (zod-validated; rejection returns `null`, so all four consumers keep their
   `lib/brand` fallbacks).
-- `package.json`: `audit:deps` = `npm audit --audit-level=high` (CI hook for
-  Task 23).
+- `package.json`: `audit:deps` = `npm audit --audit-level=high` (manual command)
+  and `audit:ci` = `tsx scripts/audit-gate.ts` (the CI hook for Task 23, fails on
+  any high-or-worse advisory not in the reviewed `scripts/audit-allowlist.json`).
 - `.env.example`: CJ variables and `ALLOW_PRIVATE_PROVIDER_URLS` documented as
   server-only, with the rationale for ignoring the escape hatch in production.
 
@@ -1468,10 +1469,12 @@ store/.env.local` -> `store/.gitignore:34:.env*` matches both; `npm audit
 (same major), `nodemailer` [high] by `nodemailer@10.0.10` (major), and
 `@keystone-6/core` / `@modelcontextprotocol/sdk` / `lodash` [high] with no direct
 fix (transitive) — captured as residual risk 1 instead of a blind
-`npm audit fix`. Sandbox note: `npm run audit:deps` is intercepted by this
-environment's npm wrapper (`EALLOWSCRIPTS ... --allow-scripts is not allowed in
-project-scoped installs`); the identical command run directly works, so the
-script itself is correct.
+`npm audit fix`. Sandbox note: under `npm run`, this environment's npm wrapper
+rejects the user-level `~/.npmrc` `allow-scripts` value that npm exports as
+`npm_config_allow_scripts` (`EALLOWSCRIPTS ... --allow-scripts is not allowed in
+project-scoped installs`); `scripts/audit-gate.ts` strips that one env var from
+its `npm audit` child spawn, so `npm run audit:ci` runs the audit correctly on
+both this sandbox and CI (verified: 75 advisories ≥ high, all 75 allow-listed).
 
 ---
 
@@ -1882,7 +1885,8 @@ run tests/integration tests/security`, hermetic with no live network/db) →
 (`playwright test` with headless Chromium running against local production
 server, asserting route availability and security headers) →
 `security/dependency checks` (asserts no tracked `.env*` files in repository
-history and executes `npm run audit:deps`). Unit and integration test suites are
+history and executes `npm run audit:ci`, the allowlist-based audit gate in
+`store/scripts/audit-gate.ts`). Unit and integration test suites are
 hermetic, producing JUnit XML output.
 
 - [x] **Step 2: Run deployment only from the protected branch/tag strategy used by the project.** (2026-09-26)

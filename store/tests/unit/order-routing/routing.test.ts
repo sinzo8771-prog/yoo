@@ -1,7 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { placeMultipleOrders } from "../../../../openship/features/keystone/lib/placeMultipleOrders";
-import { supplierPurchaseAttemptKey } from "../../../../openship/features/keystone/lib/supplierPurchaseClaim";
-import { inspectSyntheticPurchases } from "../../../../openship/features/integrations/channel/synthetic";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReferenceClone } from "@/scripts/reference-clones";
+import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/reference-clones";
 
 // Task 13 end-to-end harness: the REAL pinned router, claim state machine, and
 // adapter boundary run against in-memory query/prisma fakes. The adapter module
@@ -9,6 +8,27 @@ import { inspectSyntheticPurchases } from "../../../../openship/features/integra
 // (features/integrations/channel/synthetic.ts — the verbatim mirror of
 // store/integrations/synthetic-channel/synthetic.ts), so nothing here is
 // stubbed except the database.
+//
+// Task 23 (CI follow-up): those pinned modules live in `../openship/`, one of
+// the gitignored reference clones, so they are imported in `beforeAll` and this
+// suite skips when that clone is not checked out. The `typeof import(...)`
+// annotations keep every call site type-checked wherever the clone *is*
+// checked out.
+
+const clone: ReferenceClone = "openship";
+const cloneMissing = referenceCloneMissing(clone);
+noteMissingReferenceClone(clone);
+
+let placeMultipleOrders: typeof import("../../../../openship/features/keystone/lib/placeMultipleOrders")["placeMultipleOrders"];
+let supplierPurchaseAttemptKey: typeof import("../../../../openship/features/keystone/lib/supplierPurchaseClaim")["supplierPurchaseAttemptKey"];
+let inspectSyntheticPurchases: typeof import("../../../../openship/features/integrations/channel/synthetic")["inspectSyntheticPurchases"];
+
+beforeAll(async () => {
+  if (cloneMissing) return;
+  ({ placeMultipleOrders } = await import("../../../../openship/features/keystone/lib/placeMultipleOrders"));
+  ({ supplierPurchaseAttemptKey } = await import("../../../../openship/features/keystone/lib/supplierPurchaseClaim"));
+  ({ inspectSyntheticPurchases } = await import("../../../../openship/features/integrations/channel/synthetic"));
+});
 
 type Row = {
   id: string;
@@ -133,7 +153,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("synthetic end-to-end routing (pinned router + adapter)", () => {
+describe.skipIf(cloneMissing)("synthetic end-to-end routing (pinned router + adapter)", () => {
   it("purchases matched lines through the synthetic adapter and marks the order AWAITING", async () => {
     const f = fixture();
     f.addOrder("order-1");

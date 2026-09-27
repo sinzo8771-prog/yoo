@@ -21,6 +21,7 @@
     "validate:catalog": "tsx scripts/catalog/validate.ts",
     "check:catalog": "tsx scripts/check-catalog.ts",
     "audit:deps": "npm audit --audit-level=high",
+    "audit:ci": "tsx scripts/audit-gate.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

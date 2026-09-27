@@ -1,12 +1,33 @@
 import { readFileSync } from "node:fs";
-import { buildSchema, graphql } from "graphql";
+import { buildSchema, graphql, type GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 import { stageLink, stageMatch, ensureLocalChannel, ensureSourceShop, ensureSyntheticChannelPlatform, attachSyntheticChannelPlatform } from "@/lib/openship/setup";
 import type { OpenShipRequest } from "@/lib/openship/transport";
+import type { ReferenceClone } from "@/scripts/reference-clones";
+import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/reference-clones";
 
 // Execute the public operation against the pinned generated GraphQL contract.
 // Resolvers are in-memory: this proves contract compatibility, not live hooks/auth.
-const schema = buildSchema(readFileSync(new URL("../../../../openship/schema.graphql", import.meta.url), "utf8"));
+//
+// Task 23 (CI follow-up): that contract is `schema.graphql` at the root of the
+// `../openship/` reference clone (gitignored), so it is read on first use rather
+// than at load time — a clone-less checkout has to be able to load this file in
+// order to *skip* it rather than die on a missing file.
+
+const clone: ReferenceClone = "openship";
+const cloneMissing = referenceCloneMissing(clone);
+noteMissingReferenceClone(clone);
+
+let schemaCache: GraphQLSchema | undefined;
+
+function schema(): GraphQLSchema {
+  if (!schemaCache) {
+    schemaCache = buildSchema(
+      readFileSync(new URL("../../../../openship/schema.graphql", import.meta.url), "utf8")
+    );
+  }
+  return schemaCache;
+}
 
 function fixture() {
   const links: Record<string, unknown>[] = [];
@@ -154,14 +175,14 @@ function fixture() {
     },
   };
   const request: OpenShipRequest = async <T>(source: string, variableValues: Record<string, unknown>) => {
-    const result = await graphql({ schema, source, variableValues, rootValue });
+    const result = await graphql({ schema: schema(), source, variableValues, rootValue });
     if (result.errors) throw new Error(result.errors.map(error => error.message).join("; "));
     return result.data as T;
   };
   return { request, links, channels, matches, shops, platforms, rootValue, creates: () => creates, channelCreates: () => channelCreates, matchCreates: () => matchCreates, shopCreates: () => shopCreates, platformCreates: () => platformCreates, channelUpdates: () => channelUpdates };
 }
 
-describe("stageLink", () => {
+describe.skipIf(cloneMissing)("stageLink", () => {
   it("creates one disabled link and reuses it on a sequential repeat", async () => {
     const f = fixture();
     const input = { ownerId: "operator", shopId: "shop", channelId: "channel" };
@@ -199,7 +220,7 @@ describe("stageLink", () => {
   });
 });
 
-describe("ensureLocalChannel", () => {
+describe.skipIf(cloneMissing)("ensureLocalChannel", () => {
   it("reuses the named channel and never duplicates it on a repeat", async () => {
     const f = fixture();
     const input = { ownerId: "operator", name: "local-test-supplier" };
@@ -224,7 +245,7 @@ describe("ensureLocalChannel", () => {
   });
 });
 
-describe("ensureSourceShop", () => {
+describe.skipIf(cloneMissing)("ensureSourceShop", () => {
   const input = { ownerId: "operator", name: "openfront-orders" };
 
   it("reuses the named shop and never duplicates it on a repeat", async () => {
@@ -264,7 +285,7 @@ describe("ensureSourceShop", () => {
   });
 });
 
-describe("stageMatch", () => {
+describe.skipIf(cloneMissing)("stageMatch", () => {
   const input = {
     ownerId: "operator", shopId: "shop", channelId: "channel",
     source: { productId: "prod_1", variantId: "var_1" },
@@ -375,7 +396,7 @@ describe("stageMatch", () => {
   });
 });
 
-describe("ensureSyntheticChannelPlatform", () => {
+describe.skipIf(cloneMissing)("ensureSyntheticChannelPlatform", () => {
   it("creates the synthetic platform row once and reuses it on repeat", async () => {
     const f = fixture();
     const first = await ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" });
@@ -453,7 +474,7 @@ describe("ensureSyntheticChannelPlatform", () => {
   });
 });
 
-describe("attachSyntheticChannelPlatform", () => {
+describe.skipIf(cloneMissing)("attachSyntheticChannelPlatform", () => {
   const attachInput = { ownerId: "operator", channelId: "channel", platformId: "platform-1" };
   const makeAttached = async (f = fixture()) => {
     const platform = await ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" });

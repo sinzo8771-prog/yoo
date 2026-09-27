@@ -26,12 +26,26 @@
  * that diff like any other change: a baseline that grows is a regression, and a
  * baseline that shrinks is progress worth noting in the PR.
  *
+ * Two things are deliberately *not* counted, because they belong to the
+ * checkout rather than to the code, and counting them would make the gate fail
+ * on a clean machine while passing on the developer's:
+ *
+ *  - an embedded absolute path + code frame inside a rule's message (React
+ *    Compiler rules do this) — normalized away in `normalizeLintMessage`, so
+ *    the key is the same on Windows and on the Linux runner;
+ *  - `TS2307` for a module that lives in one of the pinned reference clones,
+ *    which are gitignored and therefore absent in CI — classified by
+ *    `isEnvironmentDependentTypeError` and *reported* rather than counted. Fix
+ *    the environment (check the clone out) and any genuine `TS2307` counts
+ *    again the moment the module could have resolved.
+ *
  * Raw, ungated output stays available (`npm run lint`, `npm run typecheck`), so
  * a developer can still see every problem.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isMissingReferenceCloneModule } from "./reference-clones";
 
 /** Store package root: the parent of `scripts/`. */
 const ROOT = path.resolve(__dirname, "..");
@@ -40,6 +54,12 @@ const BASELINE_PATH = path.join(ROOT, "scripts", "quality-baseline.json");
 type Check = "lint" | "typecheck";
 /** problem key → how many times it occurs (duplicates are real). */
 export type ProblemCounts = Record<string, number>;
+/**
+ * One check's findings: the keys the gate counts, plus the keys this checkout
+ * cannot see the cause of — only `TS2307` for a module inside a reference clone
+ * that is not checked out here (see the file header).
+ */
+type Collected = { keys: string[]; environmentDependent: string[] };
 type Baselines = Record<Check, ProblemCounts>;
 
 const CHECKS: Check[] = ["lint", "typecheck"];
@@ -110,12 +130,43 @@ function toPosix(relative: string): string {
   return relative.split(path.sep).join("/");
 }
 
+/** `path/to/file.tsx:12:3` — the header of a code frame embedded in a message. */
+const CODE_FRAME_LABEL = /[^\s|]*\.(?:[cm]?[jt]sx?):\d+:\d+/;
+
+/**
+ * The message half of a lint key, with the parts that describe *this checkout*
+ * instead of the code removed.
+ *
+ * Most rules emit one stable sentence, but the React Compiler rules
+ * (`react-hooks/refs`, `react-hooks/purity`, `react-hooks/set-state-in-effect`,
+ * `react-hooks/preserve-manual-memoization`) append the file's absolute path, a
+ * `line:col` label and the surrounding source lines. Kept verbatim, one problem
+ * keys as `… C:\Users\dev\…\TrackEvent.tsx:30:3 …` on a workstation and
+ * `… /home/runner/work/yoo/yoo/store/…:30:3 …` on the CI runner, so every one of
+ * them is reported as both fixed *and* new — a red gate on an unchanged tree.
+ * The code frame has a second problem of its own: it renumbers whenever a line
+ * is inserted above it, which the "no line/column in the key" rule exists to
+ * prevent.
+ *
+ * Cutting at the label keeps the rule's own summary, which is what the baseline
+ * is comparing. `undefined`/empty messages keep their (empty) text so a `fatal`
+ * entry is still keyed distinctly.
+ */
+export function normalizeLintMessage(message: string): string {
+  // Collapse whitespace first: several rules emit multi-line messages with code
+  // frames, which would otherwise put newlines into a JSON key and make the
+  // baseline unreadable.
+  const collapsed = message.replace(/\s+/g, " ").trim();
+  const label = collapsed.search(CODE_FRAME_LABEL);
+  return label === -1 ? collapsed : collapsed.slice(0, label).trim();
+}
+
 /**
  * ESLint's JSON output. Messages are keyed without line/column so a pure line
  * shift is not reported as a new problem; `fatal` (ruleId null) is kept because
  * a parse/config crash must still fail the gate.
  */
-function collectLint(): string[] {
+function collectLint(): Collected {
   const bin = path.join(ROOT, "node_modules", "eslint", "bin", "eslint.js");
   const { stdout, stderr } = runNode(bin, [".", "-f", "json"]);
   if (!stdout.trim()) {
@@ -131,32 +182,54 @@ function collectLint(): string[] {
     for (const message of result.messages ?? []) {
       const severity = message.severity === 2 ? "error" : "warn";
       const rule = message.ruleId ?? "fatal";
-      // Collapse whitespace: several rules emit multi-line messages with code
-      // frames, which would otherwise put newlines into a JSON key and make the
-      // baseline unreadable.
-      const text = (message.message ?? "").replace(/\s+/g, " ").trim();
+      const text = normalizeLintMessage(message.message ?? "");
       keys.push(`${file} | ${severity} | ${rule} | ${text}`);
     }
   }
-  return keys;
+  // ESLint needs no environment-dependent classification: it resolves no
+  // modules, so a clone-less checkout lints exactly the same tree.
+  return { keys, environmentDependent: [] };
 }
 
 /** tsc lines look like: `path(line,col): error TSxxxx: message`. */
-function collectTypecheck(): string[] {
+function collectTypecheck(): Collected {
   const bin = path.join(ROOT, "node_modules", "typescript", "bin", "tsc");
   const { stdout, stderr } = runNode(bin, ["--noEmit", "--pretty", "false"]);
   const keys: string[] = [];
+  const environmentDependent: string[] = [];
   for (const line of `${stdout}\n${stderr}`.split(/\r?\n/)) {
     const match = /^(.+?)\(\d+,\d+\):\s+(error|warning)\s+(TS\d+):\s*(.*)$/.exec(line.trim());
-    if (match) {
-      const [, file, kind, code, message] = match;
-      keys.push(`${toPosix(file)} | ${kind} | ${code} | ${message}`);
-    }
+    if (!match) continue;
+    const [, file, kind, code, message] = match;
+    const key = `${toPosix(file)} | ${kind} | ${code} | ${message}`;
+    if (isEnvironmentDependentTypeError(file, code, message)) environmentDependent.push(key);
+    else keys.push(key);
   }
-  return keys;
+  return { keys, environmentDependent };
 }
 
-const COLLECTORS: Record<Check, () => string[]> = {
+/**
+ * Is this type error caused by the checkout rather than by the code?
+ *
+ * Exactly one shape qualifies: `TS2307` ("Cannot find module") for a module
+ * that lives inside a pinned reference clone which is not checked out here. The
+ * importer is not wrong and cannot be fixed from this repository — but the
+ * moment the clone *is* present the import resolves and the same code counts
+ * against the baseline again, so a mistake of this shape is never permanently
+ * forgiven.
+ *
+ * Everything else counts, including `TS2307` for a module this repository is
+ * supposed to own (`../generated/openfront-db`, for instance: a missing
+ * `prisma generate`, not a missing clone — CI runs the generator for exactly
+ * that reason).
+ */
+export function isEnvironmentDependentTypeError(file: string, code: string, message: string): boolean {
+  if (code !== "TS2307") return false;
+  const specifier = /^Cannot find module '([^']+)'/.exec(message)?.[1];
+  return specifier !== undefined && isMissingReferenceCloneModule(specifier, file);
+}
+
+const COLLECTORS: Record<Check, () => Collected> = {
   lint: collectLint,
   typecheck: collectTypecheck,
 };
@@ -187,18 +260,36 @@ export function total(counts: ProblemCounts): number {
 /** Only the first few print; a wall of text hides the one that matters. */
 const MAX_PRINTED = 10;
 
+/**
+ * Say out loud what the gate is *not* counting. Staying silent would make the
+ * tolerance a hidden hole: these keys cannot be verified in this checkout, so
+ * they are printed on every run — and when the reference clones are present
+ * (a recon workstation) this prints nothing at all, because nothing qualifies.
+ */
+function reportEnvironmentDependent(keys: string[]): void {
+  if (keys.length === 0) return;
+  console.log(
+    `    ${keys.length} problem(s) point into a reference clone that is not checked out here (reported, not counted):`
+  );
+  for (const key of keys.slice(0, MAX_PRINTED)) console.log(`    env: ${key}`);
+  if (keys.length > MAX_PRINTED) console.log(`    …and ${keys.length - MAX_PRINTED} more.`);
+}
+
 function runCheck(check: Check, baselines: Baselines, update: boolean): boolean {
-  const current = tally(COLLECTORS[check]());
+  const collected = COLLECTORS[check]();
+  const current = tally(collected.keys);
   const previous = total(baselines[check]);
   if (update) {
     baselines[check] = current;
     console.log(
       `  ${check}: baselined ${total(current)} problem(s) (was ${previous}) in ${BASELINE_PATH}.`
     );
+    reportEnvironmentDependent(collected.environmentDependent);
     return true;
   }
   const { added, fixed } = diff(baselines[check], current);
   console.log(`  ${check}: ${total(current)} problem(s) reported, ${previous} baselined.`);
+  reportEnvironmentDependent(collected.environmentDependent);
   const fixedCount = fixed.reduce((sum, [, count]) => sum + count, 0);
   if (fixedCount > 0) {
     console.log(

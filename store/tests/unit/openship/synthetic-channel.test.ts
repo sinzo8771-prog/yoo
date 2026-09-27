@@ -1,13 +1,34 @@
 import { readFileSync } from "node:fs";
-import { buildSchema, graphql } from "graphql";
+import { buildSchema, graphql, type GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
+import type { ReferenceClone } from "@/scripts/reference-clones";
+import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/reference-clones";
 
 // Task 11 red tests: drive the pinned createChannelPurchase contract the way
 // OpenShip's executeChannelAdapterFunction does (dynamic import by the platform's
 // function name, call adapter[functionName]({ platform, ...args })). In-memory
 // channel row; the adapter module under @/integrations/synthetic-channel does not
 // exist yet, so these tests must fail on the missing integration.
-const schema = buildSchema(readFileSync(new URL("../../../../openship/schema.graphql", import.meta.url), "utf8"));
+//
+// Task 23 (CI follow-up): the contract is `schema.graphql` at the root of the
+// `../openship/` reference clone (gitignored), so it is read on first use rather
+// than at load time — a clone-less checkout has to be able to load this file in
+// order to *skip* it rather than die on a missing file.
+
+const clone: ReferenceClone = "openship";
+const cloneMissing = referenceCloneMissing(clone);
+noteMissingReferenceClone(clone);
+
+let schemaCache: GraphQLSchema | undefined;
+
+function schema(): GraphQLSchema {
+  if (!schemaCache) {
+    schemaCache = buildSchema(
+      readFileSync(new URL("../../../../openship/schema.graphql", import.meta.url), "utf8")
+    );
+  }
+  return schemaCache;
+}
 
 const syntheticPlatform = {
   name: "synthetic",
@@ -68,7 +89,7 @@ function fixture() {
     },
   };
   const request = async <T>(source: string, variableValues?: Record<string, unknown>): Promise<T> => {
-    const result = await graphql({ schema, source, variableValues, rootValue });
+    const result = await graphql({ schema: schema(), source, variableValues, rootValue });
     if (result.errors) throw new Error(result.errors.map(error => error.message).join("; "));
     return result.data as T;
   };
@@ -85,7 +106,7 @@ const knownOrder = {
   },
 };
 
-describe("synthetic channel adapter (Task 11)", () => {
+describe.skipIf(cloneMissing)("synthetic channel adapter (Task 11)", () => {
   it("creates a deterministic purchase for a known SKU through the pinned mutation", async () => {
     const f = fixture();
     const first = await f.request<{ createChannelPurchase: { success: boolean; purchaseId: string } }>(
