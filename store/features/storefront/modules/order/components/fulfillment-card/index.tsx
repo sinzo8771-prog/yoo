@@ -11,7 +11,12 @@ import {
   Clock,
 } from "lucide-react";
 import { StoreOrder } from "@/features/storefront/types/storefront";
+import { ProductImage } from "@/components/media/ProductImage";
 import Divider from "@/features/storefront/modules/common/components/divider";
+import {
+  sanitizeTrackingNumber,
+  sanitizeTrackingUrl,
+} from "@/lib/fulfillment/customerTracking";
 
 type FulfillmentCardProps = {
   order: StoreOrder & {
@@ -188,8 +193,18 @@ const FulfillmentCard: React.FC<FulfillmentCardProps> = ({ order }) => {
               }`}
             >
               <div
-                className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                role="button"
+                tabIndex={0}
+                aria-expanded={expandedFulfillments.includes(fulfillment.id)}
+                aria-label={`Shipment ${index + 1} details`}
+                className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 onClick={() => toggleFulfillment(fulfillment.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleFulfillment(fulfillment.id);
+                  }
+                }}
               >
                 <div className="flex items-center gap-4">
                   {/* <div
@@ -268,24 +283,41 @@ const FulfillmentCard: React.FC<FulfillmentCardProps> = ({ order }) => {
                                 </p>
                               )}
                               {fulfillment.shippingLabels[0].trackingNumber && (
-                                // <p className="text-xs text-slate-700 dark:text-slate-300 font-mono">
-                                //   {fulfillment.shippingLabels[0].trackingNumber}
-                                // </p>
+                                // Task 14 Step 2: the supplier supplies this URL,
+                                // so it is validated before it can become an
+                                // href. When it cannot be safely projected the
+                                // customer still sees the plain number — never
+                                // an arbitrary redirect target.
+                                (() => {
+                                  const label = fulfillment.shippingLabels[0];
+                                  const trackingUrl = sanitizeTrackingUrl(
+                                    label.trackingUrl,
+                                    { carrier: label.carrier }
+                                  );
+                                  const number = sanitizeTrackingNumber(
+                                    label.trackingNumber
+                                  );
 
-                                <a
-                                  href={
-                                    fulfillment.shippingLabels[0].trackingUrl ||
-                                    "#"
-                                  }
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1"
-                                >
-                                  {fulfillment.shippingLabels[0].trackingNumber}
+                                  if (!number) return null;
 
-                                  <ArrowUpRight className="h-3 w-3" />
-                                </a>
+                                  return trackingUrl ? (
+                                    <a
+                                      href={trackingUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1"
+                                    >
+                                      {number}
+
+                                      <ArrowUpRight className="h-3 w-3" />
+                                    </a>
+                                  ) : (
+                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300 font-mono">
+                                      {number}
+                                    </p>
+                                  );
+                                })()
                               )}
                             </div>
                           </div>
@@ -296,12 +328,16 @@ const FulfillmentCard: React.FC<FulfillmentCardProps> = ({ order }) => {
                     <div className="px-4 py-3 space-y-3">
                       {fulfillment.fulfillmentItems.map((item) => (
                         <div key={item.id} className="flex items-start gap-3">
-                          <div className="w-12 h-12 bg-muted rounded overflow-hidden flex-shrink-0">
+                          <div className="relative w-12 h-12 bg-muted rounded overflow-hidden flex-shrink-0">
                             {item.lineItem.thumbnail ? (
-                              <img
+                              /* Task 20, steps 2 + 4: shared image component (a
+                                 non-allowlisted supplier host degrades to a
+                                 plain <img> instead of a 400), decorative alt
+                                 because the title below names the item. */
+                              <ProductImage
                                 src={item.lineItem.thumbnail}
-                                alt={item.lineItem.title}
-                                className="w-full h-full object-cover"
+                                alt=""
+                                sizes="48px"
                               />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">

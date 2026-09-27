@@ -30,4 +30,14 @@ No preparation checkbox certifies implemented behavior or live validation.
 - [ ] Record actual authenticated dispatch and persisted outcomes separately
       from mocks/import checks; synthetic end-to-end gate precedes real secrets.
 
+### Progress note (2026-09-18 — none of the boxes above are ticked by this)
+- Adapter module written: `store/integrations/cj-channel/cj.ts`, mirrored
+  verbatim to `openship/features/integrations/channel/cj.ts`. Reads implement
+  the verified contract (adding-a-supplier-provider.md §5/§6, exercised live
+  read-only); every write path fails closed (§7); contract tests at
+  `store/tests/unit/cj-channel/cj.test.ts` (26 tests, no network).
+- Not claimed: sandbox purchase/cancel/webhook validation, duplicate-order
+  idempotency testing, replay handling, reconciliation — all still require the
+  evidence the unchecked boxes demand. `TASK_12_IMPLEMENTED` remains NO.
+
 TASK_12_IMPLEMENTED: NO

@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+# Task 24 — Openfront backend production image.
+#
+# Build context is the REPO ROOT (see docker-compose.prod.yml), because
+# `openfront/` is a gitignored pinned clone: a Dockerfile placed inside it could
+# never be tracked, and the plan requires deployment configuration to live in
+# versioned paths. Source enters via COPY openfront/ below; the root
+# .dockerignore strips .env*, node_modules, .next and .keystone first.
+#
+# Build mirrors upstream's own railway.toml exactly:
+#   buildCommand = "keystone build --no-ui && next build"
+#   startCommand = "npm run migrate && next start"
+# i.e. NO database access is required at build time (migrations run at start —
+# repository-supported mechanism: `npm run migrate` = `prisma migrate deploy`).
+#
+# Build-time env values below are PLACEHOLDERS, never secrets. They are required
+# because `next build` runs with NODE_ENV=production and features/keystone/index.ts
+# productionEnv() throws without S3_*/SESSION_SECRET/DATABASE_URL even for
+# storage-less builds (docs/architecture/current-state.md §env). Real values are
+# injected at container start by docker-compose.prod.yml from the host .env.
+
+FROM node:24-bookworm-slim
+
+# Prisma needs libssl/openssl at RUNTIME (it opens the Postgres connection with
+# TLS capability) — without it Prisma warns "failed to detect the libssl/openssl
+# version" and defaults to openssl-1.1.x, which may fail on TLS connections.
+# Found during the Task 24 rehearsal (seed + migrate both warned).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Placeholder build-time env (overridable; real secrets arrive at runtime).
+ARG SESSION_SECRET=build-placeholder-session-secret-0123456789abcdef
+ARG DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/openfront
+ARG S3_BUCKET_NAME=build-placeholder-bucket
+ARG S3_REGION=build-placeholder-region
+ARG S3_ACCESS_KEY_ID=build-placeholder-key
+ARG S3_SECRET_ACCESS_KEY=build-placeholder-secret
+ARG S3_ENDPOINT=https://placeholder.invalid
+# Inlined into the dashboard's client bundle at build (compose passes the real
+# public API origin from the root .env; see docker-compose.prod.yml).
+ARG NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
+ARG NEXT_PUBLIC_DEFAULT_REGION=us
+ENV SESSION_SECRET=${SESSION_SECRET} \
+    DATABASE_URL=${DATABASE_URL} \
+    S3_BUCKET_NAME=${S3_BUCKET_NAME} \
+    S3_REGION=${S3_REGION} \
+    S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID} \
+    S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY} \
+    S3_ENDPOINT=${S3_ENDPOINT} \
+    NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL} \
+    NEXT_PUBLIC_DEFAULT_REGION=${NEXT_PUBLIC_DEFAULT_REGION} \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+# Dependencies first — layer is cached until the lockfiles change.
+COPY openfront/package.json openfront/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# Full source, then the upstream build verbatim (no migrate here: no DB yet).
+COPY openfront/ ./
+RUN npx keystone build --no-ui && npx next build
+
+# Runtime port matches scripts/healthcheck.mjs default (openfront → 3001).
+ENV PORT=3001
+EXPOSE 3001
+
+# Same start sequence as upstream railway.toml: migrate (prisma migrate deploy)
+# then serve. A failing migration fails the container start, which is the
+# intended behaviour (see docs/ops/deployment.md §migrations).
+CMD ["sh", "-c", "npm run migrate && npm start"]

@@ -12,8 +12,16 @@
  * success — an order id either exists (or must be told about honestly).
  */
 export class CheckoutUnavailableError extends Error {
-  constructor(message: string) {
+  /**
+   * Sanitized machine-readable class for structured logs (Task 17, Step 2).
+   * Set at throw sites from a closed vocabulary — the raw backend string may
+   * embed provider/session internals and must never be logged directly.
+   */
+  errorClass?: string;
+
+  constructor(message: string, errorClass?: string) {
     super(message);
     this.name = "CheckoutUnavailableError";
+    this.errorClass = errorClass;
   }
 }

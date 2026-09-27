@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+# Task 24 — OpenShip fulfillment backend production image.
+#
+# Same layout rationale as Dockerfile.openfront: repo-root build context because
+# `openship/` is a gitignored pinned clone; all deployment files stay tracked.
+#
+# CRITICAL difference from upstream: openship's package.json `build` script is
+#   "build": "keystone build --no-ui && npm run migrate && next build"
+# — it runs migrations DURING build, which fails in an image build (no database
+# reachable, exactly the constraint upstream's own railway.toml works around by
+# using buildCommand "keystone build --no-ui && next build"). We therefore run
+# the two build steps explicitly and keep `npm run migrate` for container start.
+#
+# The local working tree also carries two UNTRACKED project files that upstream
+# does not have and the deployment needs:
+#   features/integrations/channel/cj.ts        (Task 12, fails closed)
+#   features/integrations/channel/synthetic.ts (Task 11 synthetic channel)
+# COPY openship/ ./ transfers them from the local clone; deployment.md documents
+# that a fresh VPS checkout must overlay these files (see §Obtain the source).
+
+FROM node:24-bookworm-slim
+
+# Prisma needs libssl/openssl at RUNTIME (it opens the Postgres connection with
+# TLS capability) — without it Prisma warns "failed to detect the libssl/openssl
+# version" and defaults to openssl-1.1.x, which may fail on TLS connections.
+# Found during the Task 24 rehearsal (seed + migrate both warned).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Placeholder build-time env (overridable; real secrets arrive at runtime).
+ARG SESSION_SECRET=build-placeholder-session-secret-0123456789abcdef
+ARG DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/openship
+ARG OAUTH_STATE_SECRET=build-placeholder-oauth-state-secret-0123456789abcdef
+# Inlined into the dashboard's client bundle at build (compose passes
+# OPENSHIP_PUBLIC_URL from the root .env; see docker-compose.prod.yml).
+ARG NEXT_PUBLIC_URL=http://localhost:3002
+ENV SESSION_SECRET=${SESSION_SECRET} \
+    DATABASE_URL=${DATABASE_URL} \
+    OAUTH_STATE_SECRET=${OAUTH_STATE_SECRET} \
+    NEXT_PUBLIC_URL=${NEXT_PUBLIC_URL} \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+COPY openship/package.json openship/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY openship/ ./
+# Upstream build command minus `npm run migrate` (see header).
+RUN npx keystone build --no-ui && npx next build
+
+# Runtime port matches scripts/healthcheck.mjs default (openship → 3002).
+ENV PORT=3002
+EXPOSE 3002
+
+# Same start sequence as upstream railway.toml (migrate, then serve).
+CMD ["sh", "-c", "npm run migrate && npm start"]

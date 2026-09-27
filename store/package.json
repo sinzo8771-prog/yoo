@@ -7,12 +7,21 @@
     "prebuild": "npm run db:generate:openfront",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "lint:ci": "tsx scripts/quality-gate.ts lint",
+    "typecheck:ci": "tsx scripts/quality-gate.ts typecheck",
+    "quality:baseline": "tsx scripts/quality-gate.ts --update",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate:openfront": "prisma generate --schema prisma/openfront.prisma",
     "seed:dev": "tsx scripts/seed-dev-catalog.ts",
-    "check:catalog": "tsx scripts/check-catalog.ts"
+    "seed:catalog": "tsx scripts/seed-catalog.ts",
+    "media:catalog": "tsx scripts/generate-catalog-media.ts",
+    "validate:catalog": "tsx scripts/catalog/validate.ts",
+    "check:catalog": "tsx scripts/check-catalog.ts",
+    "audit:deps": "npm audit --audit-level=high",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.23",
@@ -103,7 +112,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/graphql-upload": "^17.0.0",
     "@types/node": "^20.14.10",

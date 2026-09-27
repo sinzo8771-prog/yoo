@@ -315,7 +315,15 @@ documented upstream and each one silently breaks a naive client:
    `calculatedPrice` as an override.
 4. **`Product.thumbnail` is virtual**, resolved from `productImages[0]`'s
    `image.url` (falling back to `imagePath`). It is null when a product has no
-   images, so clients need an image fallback.
+   images, so clients need an image fallback. **VERIFIED (Task 22):** a
+   `ProductImage` written with only `imagePath` — no uploaded asset, so
+   `image_id` is null and `image` resolves to `null` — is invisible to a client
+   that reads only `image.url`: the gallery comes back empty even though the
+   card thumbnail still renders, because the virtual field itself falls back to
+   `imagePath`. `store/lib/openfront/catalog.ts` therefore selects `imagePath`
+   alongside `image { url }` and mirrors this same fallback
+   (`i.image.url || i.imagePath`). Set `image_id` only when a real uploaded
+   asset exists, or the backend will advertise a storage URL that 404s.
 5. **Availability semantics**: `manageInventory === false` → sellable;
    otherwise sellable only when `allowBackorder === true` or
    `inventoryQuantity > 0`.

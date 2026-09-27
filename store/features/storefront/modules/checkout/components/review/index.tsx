@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils"
 
+import LocalizedClientLink from "@/features/storefront/modules/common/components/localized-client-link"
 import PaymentButton from "../payment-button"
 import { useSearchParams } from "next/navigation"
 
@@ -39,9 +40,28 @@ const Review = ({ cart }: { cart: any }) => {
             <div className="w-full">
               <p className="text-sm text-foreground mb-1">
                 By clicking the Place Order button, you confirm that you have
-                read, understand and accept our Terms of Use, Terms of Sale and
-                Returns Policy and acknowledge that you have read Openfront
-                Store&apos;s Privacy Policy.
+                read, understand and accept our{" "}
+                <LocalizedClientLink
+                  href="/policies/terms"
+                  className="underline underline-offset-4"
+                >
+                  Terms
+                </LocalizedClientLink>
+                , our{" "}
+                <LocalizedClientLink
+                  href="/policies/returns"
+                  className="underline underline-offset-4"
+                >
+                  Returns policy
+                </LocalizedClientLink>{" "}
+                and our{" "}
+                <LocalizedClientLink
+                  href="/policies/privacy"
+                  className="underline underline-offset-4"
+                >
+                  Privacy policy
+                </LocalizedClientLink>
+                .
               </p>
             </div>
           </div>

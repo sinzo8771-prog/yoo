@@ -10,6 +10,7 @@ import { productPriceSummary } from "@/features/catalog/lib/price-display";
 import { site } from "@/lib/brand/site";
 import type { CatalogProduct } from "@/lib/openfront/catalog";
 import { getBaseUrl } from "@/features/storefront/lib/getBaseUrl";
+import { toJsonLdString } from "@/lib/security/jsonld";
 import Script from "next/script";
 
 /**
@@ -85,7 +86,9 @@ export async function StructuredProductData({
       id={`product-ldjson-${product.id}`}
       type="application/ld+json"
       strategy="beforeInteractive"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+      // Task 18: escaped for script-element context, so catalog text containing
+      // `</script>` cannot break out of this element.
+      dangerouslySetInnerHTML={{ __html: toJsonLdString(data) }}
     />
   );
 }

@@ -25,3 +25,6 @@ Thumbs.db
 .DS_Store
 .vscode/
 .claude/
+
+# Production backup archives (docker/postgres-backup.sh writes here)
+/backups/

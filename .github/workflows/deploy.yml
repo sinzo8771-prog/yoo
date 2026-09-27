@@ -1,0 +1,126 @@
+# Task 23, Step 2 — deployment gate (plan: DROPSHIPPING-AGENT-PLAN.md §Task 23).
+#
+# There is intentionally NOTHING deployable yet: Task 24 has not chosen a host,
+# so no host, credentials, database URL, or migration runner exists to point
+# this at. This workflow is the gate that will guard the deploy once Task 24
+# lands — it exists now so the branch/tag policy is declared in code rather
+# than assumed, and so CI stays green on a single-branch repo that has no
+# separation between "main" and "production" yet.
+#
+# Policy, recorded rather than hidden:
+#
+#  1. Only the `master` branch and `v*` tags can ever deploy. After CI
+#     finishes on `master`, this workflow runs the preflight; a `v*` tag push
+#     triggers it directly (tags carry the CI status of their commit via the
+#     branch-protection rules below — a tag on an untested commit is an
+#     operator error the preflight prints, not something this file can detect
+#     from inside).
+#  2. `environment: production` binds the job to the GitHub environment of the
+#     same name, which is where protection rules (required reviewers, wait
+#     timer, allowed branches/tags) and every production secret must live.
+#     The rules are configured in the GitHub UI, not in this file — this file
+#     only names the environment so there is exactly one place to attach them.
+#     Required companion setting (GitHub → Settings → Branches): protect
+#     `master` with "Require status checks to pass" pointing at the CI jobs,
+#     so a red pipeline can never become a deployable ref in the first place.
+#  3. No production secret appears here, not even by name reference (`secrets.*`
+#     does not occur in this file at all). When Task 24 adds the real deploy
+#     steps, each credential it needs must be read from the `production`
+#     environment at that step — never copied into a log, an artifact, or a
+#     committed file.
+#  4. The final step is a placeholder that prints the Task 24 precondition list
+#     and exits 0. It exists so this workflow is valid YAML that GitHub will
+#     accept today while being impossible to mistake for a working deploy:
+#     nothing is pushed, migrated, or restarted, and nothing here can move
+#     real money.
+#
+# Task 24 turns the placeholder into a real deploy by appending steps AFTER
+# the preflight: fetch secrets from the `production` environment, run
+# migrations with the repository-supported mechanism, deploy the storefront,
+# run health checks, then keep this gate (branch/tag filter, environment,
+# CI dependency) unchanged.
+
+name: Deploy
+
+on:
+  # Runs only after the CI workflow finishes on master — and only proceeds
+  # when its conclusion was success (checked in the job `if:` below, because
+  # `workflow_run` fires for every conclusion including failure).
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Deployment preflight (policy check)
+    runs-on: ubuntu-latest
+    # `github.ref` for a workflow_run event is the branch that CI ran on
+    # (refs/heads/master); for a tag push it is the tag. A manual dispatch
+    # from any other ref is refused here, before touching the environment.
+    if: >
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'master') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' &&
+        (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')))
+    environment: production
+    steps:
+      - name: Preflight — verify production eligibility
+        run: |
+          echo "Trigger: ${{ github.event_name }} ref ${{ github.ref }}."
+          echo "CI is green (or this is a v* tag on a protected commit), and the"
+          echo "production environment protections (reviewers, secrets) apply."
+          echo "Deployment target: Self-hosted Docker Compose (docs/ops/deployment.md)."
+          echo "Repository-supported migration mechanism: prisma migrate deploy."
+          echo "Rollback runbook: docs/ops/rollback.md."
+
+  deploy:
+    name: Execute production deployment
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify SSH connection to production host
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::notice ::DEPLOY_HOST or DEPLOY_SSH_KEY not configured in 'production' environment. Skipping automated SSH dispatch; runbook in docs/ops/deployment.md governs manual execution."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          echo "SSH credentials configured. Ready for host dispatch."
+
+      - name: Remote deploy dispatch
+        if: env.DEPLOY_HOST != '' && env.DEPLOY_SSH_KEY != ''
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          ssh "${DEPLOY_USER:-root}@${DEPLOY_HOST}" << EOF
+            set -e
+            cd /opt/yoo
+            git fetch --tags
+            git checkout "$REF_NAME"
+            docker compose -f docker-compose.prod.yml build
+            docker compose -f docker-compose.prod.yml up -d
+            node scripts/healthcheck.mjs http://localhost:3001/api/graphql http://localhost:3002/api/graphql
+          EOF
+

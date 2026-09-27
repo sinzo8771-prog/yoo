@@ -3,6 +3,8 @@ import Summary from "./summary"
 import EmptyCartMessage from "../components/empty-cart-message"
 import SignInPrompt from "../components/sign-in-prompt"
 import Divider from "@/features/storefront/modules/common/components/divider"
+import LocalizedClientLink from "@/features/storefront/modules/common/components/localized-client-link"
+import { site } from "@/lib/brand/site"
 
 interface CartTemplateProps {
   cart?: {
@@ -11,6 +13,20 @@ interface CartTemplateProps {
     region: any;
   };
   user: any;
+}
+
+/**
+ * Task 21, Step 2 — the cart is where a shopper decides, so the two policies
+ * that change that decision (shipping cost and the return window) are surfaced
+ * here. The copy is read from `site.trust.items` rather than retyped, so the
+ * cart can never quote a different return window than the Returns page.
+ */
+function cartPolicyItems() {
+  return site.trust.items.filter(
+    (item) =>
+      item.available &&
+      (item.href === "/policies/shipping" || item.href === "/policies/returns")
+  )
 }
 
 const CartTemplate = ({ cart, user }: CartTemplateProps) => {
@@ -27,6 +43,34 @@ const CartTemplate = ({ cart, user }: CartTemplateProps) => {
                 </>
               )}
               <ItemsTemplate items={cart.lineItems} region={cart.region} />
+              <Divider />
+              <section
+                aria-labelledby="cart-policies-heading"
+                data-testid="cart-policy-notice"
+              >
+                <h2
+                  id="cart-policies-heading"
+                  className="text-sm leading-5 font-medium"
+                >
+                  Before you check out
+                </h2>
+                <ul className="mt-2 flex flex-col gap-y-2 text-[0.8125rem] leading-5 text-muted-foreground">
+                  {cartPolicyItems().map((item) => (
+                    <li key={item.href}>
+                      <span className="font-medium text-foreground">
+                        {item.label}:
+                      </span>{" "}
+                      {item.body}{" "}
+                      <LocalizedClientLink
+                        className="underline underline-offset-4 hover:text-foreground"
+                        href={item.href}
+                      >
+                        Read the {item.label.toLowerCase()} policy
+                      </LocalizedClientLink>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             </div>
             <div className="relative">
               <div className="flex flex-col gap-y-8 sticky top-12">

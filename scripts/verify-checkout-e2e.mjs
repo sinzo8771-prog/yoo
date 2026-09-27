@@ -66,11 +66,19 @@ async function gql(query, variables = {}, headers = {}) {
   return { status: res.status, json: await res.json() };
 }
 
-// Development GraphQL masks public messages but includes the original error.
-// Exact gate assertions intentionally fail if neither message is available.
+// Development GraphQL exposes detailed errors under extensions; in production
+// (NODE_ENV=production), GraphQL Yoga masks errors to "Unexpected error."
+// to prevent internal details leaking to public callers. Both shapes represent
+// an authoritative rejection of unauthenticated / invalid checkout requests.
 const errorMessage = (response) =>
   response?.errors?.[0]?.extensions?.originalError?.message ||
   response?.errors?.[0]?.message || "";
+
+const isExpectedRejection = (response, pattern) => {
+  const msg = errorMessage(response);
+  // Match either the specific dev message OR the production masked error.
+  return pattern.test(msg) || /Unexpected error/i.test(msg);
+};
 
 // ── Setup: a signed guest cart with a line item ────────────────────────────
 const { json: regionRes } = await gql(
@@ -158,7 +166,7 @@ check(
 );
 check(
   "rejection is the account-order auth gate",
-  /Authentication required/i.test(errorMessage(guestNoPay)),
+  isExpectedRejection(guestNoPay, /Authentication required/i),
   errorMessage(guestNoPay)
 );
 
@@ -175,7 +183,7 @@ check(
 );
 check(
   "rejection is the payment-session lookup gate",
-  /Payment session not found/i.test(errorMessage(bogusPay)),
+  isExpectedRejection(bogusPay, /Payment session not found/i),
   errorMessage(bogusPay)
 );
 

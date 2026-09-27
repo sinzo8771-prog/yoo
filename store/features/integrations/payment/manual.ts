@@ -1,11 +1,14 @@
 export async function handleWebhookFunction({ event, headers }) {
-  // Cash on Delivery payments don't have webhooks, but we'll provide a consistent interface
-  return {
-    isValid: true,
-    event,
-    type: event.type,
-    resource: event.data,
-  };
+  // Task 16, Step 2 — the manual (cash-on-delivery) provider has NO webhook
+  // channel: there is no provider signature to verify, so no payload can be
+  // authenticated. The previous stub answered `isValid: true` for whatever it
+  // was handed — that would have accepted a forged event as verified and let
+  // it advance payment state. Openfront's runtime adapter throws for exactly
+  // this reason (see openfront/features/integrations/payment/manual.ts:
+  // "Manual payment providers do not accept webhook ingress"), so this copy
+  // now behaves identically: the ingress rejects, nothing is persisted, and
+  // COD state can only change through explicit storefront/operator actions.
+  throw new Error("Manual payment providers do not accept webhook ingress");
 }
 
 export async function createPaymentFunction({ cart, amount, currency }) {

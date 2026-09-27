@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
-import Image from "next/image"
 import React from "react"
 
+import { ProductImage } from "@/components/media/ProductImage"
 import PlaceholderImage from "@/features/storefront/modules/common/icons/placeholder-image"
 
 type ThumbnailProps = {
@@ -10,6 +10,13 @@ type ThumbnailProps = {
   size?: "small" | "medium" | "large" | "full" | "square";
   isFeatured?: boolean;
   className?: string;
+  /**
+   * Task 20, step 4: alt text is opt-in. An empty alt is correct wherever the
+   * surrounding link or heading already names the product (store grid, cart,
+   * order history); those surfaces used to announce "Thumbnail" for every single
+   * item. Pass a title only when the image is the sole label of a link.
+   */
+  alt?: string;
   "data-testid"?: string;
 };
 
@@ -19,6 +26,7 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
   size = "small",
   isFeatured,
   className,
+  alt = "",
   "data-testid": dataTestid,
 }) => {
   const initialImage =
@@ -45,7 +53,7 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
       )}
       data-testid={dataTestid}
     >
-      <ImageOrPlaceholder image={initialImage} size={size} />
+      <ImageOrPlaceholder image={initialImage} size={size} alt={alt} />
     </div>
   )
 }
@@ -53,16 +61,14 @@ const Thumbnail: React.FC<ThumbnailProps> = ({
 const ImageOrPlaceholder = ({
   image,
   size,
-}: Pick<ThumbnailProps, "size"> & { image?: string }) => {
+  alt,
+}: Pick<ThumbnailProps, "size"> & { image?: string; alt: string }) => {
   return image ? (
-    <Image
+    <ProductImage
       src={image}
-      alt="Thumbnail"
-      className="absolute inset-0 object-cover object-center"
-      draggable={false}
-      sizes="(max-width: 576px) 280px, (max-width: 768px) 360px, (max-width: 992px) 480px, 800px"
-      fill
-      suppressHydrationWarning
+      alt={alt}
+      className="object-cover object-center"
+      sizes="(max-width: 576px) 50vw, (max-width: 768px) 33vw, (max-width: 992px) 25vw, 20vw"
     />
   ) : (
     <div className="w-full h-full absolute inset-0 flex items-center justify-center">

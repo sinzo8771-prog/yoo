@@ -1,7 +1,9 @@
+import { TrackEvent } from "@/components/analytics/TrackEvent"
 import { retrieveOrder } from "@/features/storefront/lib/data/orders"
 import OrderDetailsTemplate from "@/features/storefront/modules/order/templates/order-details-template"
-import { Metadata } from "next"
+import { buildPrivateMetadata } from "@/lib/seo/metadata"
 import { notFound } from "next/navigation"
+import type { Metadata } from "next"
 import type { StoreOrder } from '@/features/storefront/types/storefront'
 
 type Props = {
@@ -17,10 +19,9 @@ export async function generateMetadata(props: Props): Promise<Metadata> {
     notFound()
   }
 
-  return {
-    title: `Order #${order.displayId}`,
-    description: `View your order`,
-  }
+  // Task 19, Steps 1 + 2: an order page is personal — always `noindex`, never in
+  // the sitemap (the `/account` and `/order` prefixes are disallowed as well).
+  return buildPrivateMetadata(`Order #${order.displayId}`)
 }
 
 export async function AccountOrderDetailsPage(props: Props) {
@@ -32,5 +33,11 @@ export async function AccountOrderDetailsPage(props: Props) {
     notFound()
   }
 
-  return <OrderDetailsTemplate order={order} />
+  return (
+    <>
+      {/* Task 19, Step 3: the order reference is deliberately not sent. */}
+      <TrackEvent event="view_order" />
+      <OrderDetailsTemplate order={order} />
+    </>
+  )
 }

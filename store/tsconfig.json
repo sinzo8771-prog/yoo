@@ -23,6 +23,15 @@
       }
     ],
     "paths": {
+      "@/features/keystone/context": [
+        "./tests/stubs/openship-keystone-context.ts"
+      ],
+      "@/features/keystone/*": [
+        "../openship/features/keystone/*"
+      ],
+      "@/features/integrations/shop/*": [
+        "../openship/features/integrations/shop/*"
+      ],
       "@/*": [
         "./*"
       ]

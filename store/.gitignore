@@ -13,6 +13,11 @@
 # testing
 /coverage
 
+# Task 23, Step 4 — local JUnit XML mirrors what CI uploads on failure.
+# Hermetic test output only (suite names, durations, assertion text); never
+# committed, never uploaded on success, expired after 3 days in CI.
+.artifacts/
+
 # next.js
 /.next/
 /out/

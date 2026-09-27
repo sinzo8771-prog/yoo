@@ -8,8 +8,9 @@ import { site } from "@/lib/brand/site";
 
 /**
  * SiteFooter (Task 3). Link groups: DB-driven categories/collections plus the
- * static groups from `lib/brand/site.ts`. Policy links (shipping/returns/
- * privacy/terms) are appended here in Tasks 15/21 — do not add ad-hoc links
+ * static groups from `lib/brand/site.ts`. Policy links render from the
+ * `available` trust entries in `lib/brand/site.ts` (Task 15 added
+ * shipping/returns; Task 21 will add privacy/terms) — do not add ad-hoc links
  * in this component.
  */
 export default async function SiteFooter() {
@@ -104,6 +105,25 @@ export default async function SiteFooter() {
                     </li>
                   )
                 )}
+              </ul>
+            </div>
+            <div className="flex flex-col gap-y-2">
+              <span className="text-[0.8125rem] leading-[1.375rem] font-medium text-foreground">
+                Policies
+              </span>
+              <ul className="grid grid-cols-1 gap-y-2 text-muted-foreground text-[0.8125rem] leading-[1.375rem] font-normal">
+                {site.trust.items
+                  .filter((item) => item.available && item.href.startsWith("/policies/"))
+                  .map((item) => (
+                    <li key={item.href}>
+                      <LocalizedClientLink
+                        className="hover:text-foreground"
+                        href={item.href}
+                      >
+                        {item.label}
+                      </LocalizedClientLink>
+                    </li>
+                  ))}
               </ul>
             </div>
           </div>

@@ -2,19 +2,22 @@ import LocalizedClientLink from "@/features/storefront/modules/common/components
 import { site } from "@/lib/brand/site";
 
 /**
- * TrustSection (Task 5, step 4).
+ * TrustSection (Task 5, step 4; content completed by Tasks 15/21).
  *
- * Shows shipping/returns/support visibility **without fabricating policy
- * content**. Entries in `site.trust.items` are only rendered when
- * `available: true`, which today means the routes/pages actually exist.
+ * Shows shipping/returns/privacy/terms/support visibility by reading
+ * `site.trust.items` — the copy is never written in this component. Entries are
+ * only rendered when `available: true`, which today means all six routes/pages
+ * exist. Do not "fix" an empty section by linking to a route that 404s.
  *
- * The shipping/returns/privacy/terms entries are already declared in the config
- * with `available: false`; Tasks 15/21 flip that flag once the pages exist. Do
- * not "fix" an empty section by linking to a route that 404s.
+ * `mailto:` links must not go through `LocalizedClientLink`: it prefixes the
+ * country code unconditionally, which would turn `mailto:` into `/usmailto:`.
  */
 export default function TrustSection() {
   const available = site.trust.items.filter((item) => item.available);
   if (available.length === 0) return null;
+
+  const linkClass =
+    "mt-3 inline-block text-[0.8125rem] font-medium text-foreground underline underline-offset-4";
 
   return (
     <section
@@ -40,12 +43,15 @@ export default function TrustSection() {
                 {item.body}
               </p>
             ) : null}
-            <LocalizedClientLink
-              href={item.href}
-              className="mt-3 inline-block text-[0.8125rem] font-medium text-foreground underline underline-offset-4"
-            >
-              {item.label === "Support" ? "Email support" : "Open"}
-            </LocalizedClientLink>
+            {item.href.startsWith("mailto:") ? (
+              <a href={item.href} className={linkClass} rel="noreferrer">
+                Email support
+              </a>
+            ) : (
+              <LocalizedClientLink href={item.href} className={linkClass}>
+                {item.label === "Support" ? "Email support" : "Open"}
+              </LocalizedClientLink>
+            )}
           </li>
         ))}
       </ul>

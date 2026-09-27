@@ -1,0 +1,37 @@
+# Task 24 — build-context exclusions for docker/Dockerfile.* (repo-root context).
+# Secrets are excluded FIRST and hardest: images are built from this context, and
+# a .env that leaks into a layer is as bad as committing it (CI security job
+# asserts no tracked .env*, this file ensures they can't ride along untracked).
+.env
+**/.env
+**/.env.*
+!**/.env.example
+!store/.env.example
+
+# Dependency/build trees — regenerated inside the image; shipping the host's
+# (Windows) copies would both bloat the context and break native binaries.
+**/node_modules
+**/.next
+**/.keystone
+**/.turbo
+**/dist
+**/build
+**/tsconfig.tsbuildinfo
+
+# Generated Prisma clients (prisma generate runs during image build).
+**/generated
+
+# VCS + logs (context size, no build value).
+.git
+**/.git
+logs
+**/logs
+logs-*
+**/*.log
+
+# Not part of any image: reference clone (never deployed), backups written by
+# docker/postgres-backup.sh, and the plan/docs themselves.
+openfront-storefront
+backups
+docs
+.github

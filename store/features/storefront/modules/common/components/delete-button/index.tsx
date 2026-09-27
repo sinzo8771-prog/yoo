@@ -8,10 +8,12 @@ const DeleteButton = ({
   id,
   children,
   className,
+  "aria-label": ariaLabel = "Remove item",
 }: {
   id: string;
   children?: React.ReactNode;
   className?: string;
+  "aria-label"?: string;
 }) => {
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -26,8 +28,9 @@ const DeleteButton = ({
     <Button
       size="icon"
       variant="outline"
+      aria-label={children ? undefined : ariaLabel}
       onClick={() => handleDelete(id)}
-      className="text-muted-foreground"
+      className={className || "text-muted-foreground"}
     >
       {isDeleting ? <RiLoader2Fill className="animate-spin" /> : <Trash2 />}
       {children && <span>{children}</span>}

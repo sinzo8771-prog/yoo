@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { addToCart } from "@/features/storefront/lib/data/cart";
 import { useSelectedVariantId } from "../components/VariantSelector";
 import type { CatalogProduct } from "@/lib/openfront/catalog";
+import { track } from "@/lib/analytics/client";
 import { Button } from "@/components/ui/button";
 import { RiLoader2Fill } from "@remixicon/react";
 
@@ -55,6 +56,26 @@ export function AddToCartForm({
         quantity,
         countryCode,
       });
+
+      /*
+        Task 19, Step 3: `add_to_cart` is a funnel stage, so it is only sent
+        after the cart call actually succeeded — an optimistic event before the
+        response would inflate the funnel with adds that never happened. The
+        amount uses the selected variant's minor-unit price, and is omitted when
+        the catalog gave us no usable price.
+      */
+      track("add_to_cart", {
+        productId: product.id,
+        variantId,
+        quantity,
+        ...(selectedVariant?.hasPrice
+          ? {
+              currency: selectedVariant.currencyCode,
+              valueMinor: selectedVariant.price * quantity,
+            }
+          : {}),
+      });
+
       // The cart lives under the region segment; `/cart` alone would 404.
       router.push(`/${countryCode}/cart`);
     } catch (err: unknown) {

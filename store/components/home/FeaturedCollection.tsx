@@ -1,3 +1,4 @@
+import { ProductImage } from "@/components/media/ProductImage";
 import LocalizedClientLink from "@/features/storefront/modules/common/components/localized-client-link";
 import { productPriceSummary } from "@/features/catalog/lib/price-display";
 import { productRationale } from "@/features/catalog/lib/rationale";
@@ -79,14 +80,14 @@ function FeaturedProductCard({ product }: { product: CatalogProduct }) {
       >
         <div className="relative aspect-square w-full overflow-hidden rounded-md border border-border bg-secondary">
           {image ? (
-            /* Plain <img>: the app's next/image allowlist only covers the
-               configured S3 endpoint, so optimization is handled in Task 20. */
-            <img
+            /* Task 20, step 2: responsive delivery through the single reviewed
+               image component (optimizer when the host is allowlisted, plain
+               <img> when it is not — never a broken image either way). The link
+               above already names the product, so the alt stays empty. */
+            <ProductImage
               src={image.url}
               alt={image.alt ?? ""}
-              loading="lazy"
-              decoding="async"
-              className="h-full w-full object-cover"
+              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
             />
           ) : (
             <div

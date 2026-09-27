@@ -10,6 +10,8 @@ import { buildOrderConfirmationPath } from "../security/redirects";
 import { CheckoutUnavailableError } from "../security/checkout-errors";
 import { redirect } from "next/navigation";
 import { getUser } from "./user";
+import { validateShippingAddressFormat } from "@/lib/shipping/address";
+import { logEvent } from "@/lib/observability/logger";
 import { Address } from "../../types/storefront";
 
 const CART_QUERY = gql`
@@ -945,6 +947,31 @@ export async function setAddresses(currentState: any, formData: FormData) {
     }
   } else {
     // Either no address was selected or fields were modified - create new address
+
+    // Task 15, Step 2 — server-side format gate before anything is created.
+    // Format-only by design (see lib/shipping/address.ts): the manual shipping
+    // provider used for v1 performs no deliverability validation, so this is
+    // never presented to customers as carrier validation — it just stops
+    // malformed or out-of-market addresses from being created and paid for.
+    // A previously saved address (selected above) was already gated when it
+    // was created and is not re-validated here.
+    const addressValidation = validateShippingAddressFormat({
+      email: typeof email === "string" ? email : "",
+      firstName: formData.get("shippingAddress.firstName"),
+      lastName: formData.get("shippingAddress.lastName"),
+      address1: formData.get("shippingAddress.address1"),
+      city: formData.get("shippingAddress.city"),
+      postalCode: formData.get("shippingAddress.postalCode"),
+      phone: formData.get("shippingAddress.phone"),
+      countryCode: formData.get("shippingAddress.countryCode"),
+    });
+    if (!addressValidation.valid) {
+      return {
+        success: false,
+        message: addressValidation.errors[0].message,
+      };
+    }
+
     const shippingAddress: {
       firstName: FormDataEntryValue | null;
       lastName: FormDataEntryValue | null;
@@ -1244,9 +1271,26 @@ export async function setPaymentMethod(providerId: string) {
  */
 
 export async function placeOrder(paymentSessionId?: string) {
+  const startedAt = Date.now();
   try {
     return await completeOrder(paymentSessionId);
   } catch (error) {
+    // Task 17, Step 2 — exactly one structured line per failed attempt:
+    // closed correlation keys only (cartId) and a sanitized failureClass
+    // instead of the raw backend string (which can embed session internals).
+    logEvent({
+      level: "error",
+      operation: "checkout.complete",
+      status: "failed",
+      durationMs: Date.now() - startedAt,
+      correlation: { cartId: (await getCartId()) ?? undefined },
+      fields: {
+        failureClass:
+          error instanceof CheckoutUnavailableError && error.errorClass
+            ? error.errorClass
+            : "unknown",
+      },
+    });
     return {
       success: false as const,
       error: error instanceof CheckoutUnavailableError
@@ -1257,10 +1301,12 @@ export async function placeOrder(paymentSessionId?: string) {
 }
 
 async function completeOrder(paymentSessionId?: string) {
+  const startedAt = Date.now();
   const cartId = await getCartId();
   if (!cartId) {
     throw new CheckoutUnavailableError(
-      "Your session expired. Please return to your cart and try again."
+      "Your session expired. Please return to your cart and try again.",
+      "session_missing"
     );
   }
 
@@ -1272,23 +1318,27 @@ async function completeOrder(paymentSessionId?: string) {
     freshCart = await getCart(cartId);
   } catch {
     throw new CheckoutUnavailableError(
-      "We couldn't verify your cart. Please refresh the page and try again."
+      "We couldn't verify your cart. Please refresh the page and try again.",
+      "cart_unreadable"
     );
   }
   if (!freshCart) {
     throw new CheckoutUnavailableError(
-      "Your cart is no longer available. Please start a new order."
+      "Your cart is no longer available. Please start a new order.",
+      "cart_unavailable"
     );
   }
   const lineItems: any[] = freshCart.lineItems ?? [];
   if (lineItems.length === 0) {
     throw new CheckoutUnavailableError(
-      "Your cart is empty. Add items before placing an order."
+      "Your cart is empty. Add items before placing an order.",
+      "cart_empty"
     );
   }
   if (!freshCart.region?.currency?.code) {
     throw new CheckoutUnavailableError(
-      "Your cart's currency could not be confirmed. Please refresh and try again."
+      "Your cart's currency could not be confirmed. Please refresh and try again.",
+      "currency_unconfirmed"
     );
   }
 
@@ -1313,31 +1363,71 @@ async function completeOrder(paymentSessionId?: string) {
   } catch (error) {
     // Task 9, Step 4 — surface unavailable checkout capability honestly.
     const raw = error instanceof Error ? error.message : String(error);
-    console.error("Checkout completion failed");
+    // Task 17, Step 2 — classify for the structured log; the raw string may
+    // embed provider/session internals, so it is mapped, never logged.
+    const failureClass = /manual tender/i.test(raw)
+      ? "manual_tender"
+      : /payment failed:/i.test(raw)
+        ? "payment_failed"
+        : /payment provider reference|payment status|payment was not|payment reconciliation/i.test(raw)
+          ? "payment_unconfirmed"
+          : /already posted to a different account/i.test(raw)
+            ? "cross_account"
+            : /timed out|timeout|etimedout|econnreset|socket hang up|fetch failed|network error|getaddrinfo|econnrefused/i.test(raw)
+              ? "transport"
+              : "backend_error";
     if (/Manual tender/i.test(raw)) {
       throw new CheckoutUnavailableError(
-        "This payment method cannot be used for online checkout. Please choose another payment method."
+        "This payment method cannot be used for online checkout. Please choose another payment method.",
+        failureClass
       );
     }
-    if (/payment provider reference|payment status|payment was not/i.test(raw)) {
+    // Task 16, Step 4 — Openfront's handlePaidOrder throws
+    // `Payment failed: …` only when settling the session failed BEFORE
+    // createOrderFromCartAtomically runs, so at this point provably no order
+    // exists: the customer can be told that plainly (never "no charge" — a
+    // provider hold is between them and their bank).
+    if (/payment failed:/i.test(raw)) {
       throw new CheckoutUnavailableError(
-        "We couldn't confirm your payment. Check your payment status or contact support before trying again."
+        "Your payment wasn't confirmed, so no order was placed. Try again or use a different payment method, and contact your bank if it keeps failing.",
+        failureClass
+      );
+    }
+    if (/payment provider reference|payment status|payment was not|payment reconciliation/i.test(raw)) {
+      throw new CheckoutUnavailableError(
+        "We couldn't confirm your payment. Check your payment status or contact support before trying again.",
+        failureClass
       );
     }
     if (/already posted to a different account/i.test(raw)) {
       throw new CheckoutUnavailableError(
-        "This cart belongs to a different account. Please sign in with the account that created it."
+        "This cart belongs to a different account. Please sign in with the account that created it.",
+        failureClass
+      );
+    }
+    // Task 16, Step 4 — transport-level failure (timeout, reset, DNS). The
+    // backend MAY have committed before the connection dropped, so this
+    // message must claim neither "not charged" nor "no order": the orders
+    // page is the only place that knows. The cart cookie survives a failure,
+    // so a retry is possible — and if the order did commit, the next attempt
+    // stops honestly at "cart no longer available" instead of completing twice.
+    if (/timed out|timeout|etimedout|econnreset|socket hang up|fetch failed|network error|getaddrinfo|econnrefused/i.test(raw)) {
+      throw new CheckoutUnavailableError(
+        "We couldn't reach the payment service, so we can't confirm your order. Check your orders page before trying again, and contact support if you were charged.",
+        failureClass
       );
     }
     throw new CheckoutUnavailableError(
-      "Checkout is currently unavailable. We couldn't confirm your order or payment status. Contact support before trying again."
+      "Checkout is currently unavailable. We couldn't confirm your order or payment status. Contact support before trying again.",
+      failureClass
     );
   }
 
   if (!completeActiveCart?.id) {
     // A missing order id is not proof that payment or order creation failed.
     throw new CheckoutUnavailableError(
-      "We couldn't confirm your order. Check your payment status or contact support before trying again."
+      "We couldn't confirm your order. Check your payment status or contact support before trying again.",
+      "order_id_missing"
     );
   }
 
@@ -1355,9 +1445,20 @@ async function completeOrder(paymentSessionId?: string) {
   );
   if (!redirectTo) {
     throw new CheckoutUnavailableError(
-      "Your order was placed, but the confirmation page could not be opened. Check your orders in your account."
+      "Your order was placed, but the confirmation page could not be opened. Check your orders in your account.",
+      "redirect_unbuilt"
     );
   }
+
+  // Task 17, Steps 1+2 — one structured success line carrying the storefront
+  // half of the chain (cart) plus the permanent source order key (Step 1).
+  logEvent({
+    level: "info",
+    operation: "checkout.complete",
+    status: "ok",
+    durationMs: Date.now() - startedAt,
+    correlation: { cartId, sourceOrderId: completeActiveCart.id },
+  });
 
   return {
     success: true as const,

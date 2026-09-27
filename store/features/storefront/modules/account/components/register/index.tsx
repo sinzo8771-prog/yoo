@@ -75,19 +75,19 @@ const Register = ({ setCurrentView }: Props) => {
         </div>
         <ErrorMessage error={message} data-testid="register-error" />
         <span className="text-center text-foreground text-xs leading-5 font-normal mt-6">
-          By creating an account, you agree to Openfront&apos;s{" "}
+          By creating an account, you agree to our{" "}
           <LocalizedClientLink
-            href="/content/privacy-policy"
+            href="/policies/privacy"
             className="underline"
           >
-            Privacy Policy
+            Privacy policy
           </LocalizedClientLink>{" "}
           and{" "}
           <LocalizedClientLink
-            href="/content/terms-of-use"
+            href="/policies/terms"
             className="underline"
           >
-            Terms of Use
+            Terms
           </LocalizedClientLink>
           .
         </span>

@@ -7,10 +7,11 @@
  * CONTENT RULES (plan Task 5, steps 3 + 4):
  *  - No fabricated claims. Anything here must be verifiable in the running app
  *    or in the catalog data.
- *  - Policy links (shipping/returns/privacy/terms) are added in Tasks 15/21.
- *    They are declared here with `available: false` so nothing links to a page
- *    that does not exist yet, and `TrustSection` will start rendering them as
- *    soon as their task flips the flag.
+ *  - Policy links (shipping/returns/privacy/terms) are delivered by Tasks 15 and
+ *    21. They are declared here with an `available` flag so nothing links to a
+ *    page that does not exist: `TrustSection` and `SiteFooter` render an entry
+ *    only when its route is live, and the flag flips with the page in the same
+ *    change.
  */
 
 export const site = {
@@ -23,8 +24,8 @@ export const site = {
   /** Static routes shown in the header on desktop. Data-driven category links
    *  continue to come from Openfront (SideMenu / Footer). */
   navLinks: [{ label: "Shop", href: "/store" }],
-  /** Footer link groups — only routes that exist today; policy pages are added
-   *  in Tasks 15/21 and should be appended here. */
+  /** Footer link groups — only routes that exist today. Policy pages are
+   *  rendered from `trust.items` below, not from this list. */
   footer: {
     support: [
       { label: "Track your order", href: "/account/orders" },
@@ -70,10 +71,10 @@ export const site = {
     ],
   },
 
-  /** Task 5, step 4 — trust/policy visibility.
-   *  `available: false` means the page does not exist yet; the entry is kept
-   *  here so Tasks 15/21 only have to flip the flag. Do not link to a route
-   *  that is not implemented. */
+  /** Task 5, step 4 (expanded in Tasks 15/21) — trust/policy visibility.
+   *  `available: false` means the page does not exist yet, so no surface may
+   *  link to it. All four policies are live today; keep the flag and the route
+   *  in the same commit or the footer will link somewhere that 404s. */
   trust: {
     heading: "Ordering with us",
     items: [
@@ -89,20 +90,39 @@ export const site = {
         href: "mailto:support@example.com",
         available: true,
       },
-      // TODO(Task 15): shipping + returns once the policies exist.
-      { label: "Shipping", body: "", href: "/policies/shipping", available: false },
-      // TODO(Task 15): returns policy.
-      { label: "Returns", body: "", href: "/policies/returns", available: false },
-      // TODO(Task 21): privacy policy.
-      { label: "Privacy", body: "", href: "/policies/privacy", available: false },
-      // TODO(Task 21): terms of service.
-      { label: "Terms", body: "", href: "/policies/terms", available: false },
+      // Tasks 15 + 21 — shipping, returns, privacy and terms all exist at
+      // /policies/{shipping,returns,privacy,terms} (see lib/brand/policies.ts).
+      {
+        label: "Shipping",
+        body: "We ship to the US; costs and free-shipping thresholds are shown at checkout.",
+        href: "/policies/shipping",
+        available: true,
+      },
+      {
+        label: "Returns",
+        body: "30 days from delivery; every return starts with an email to support.",
+        href: "/policies/returns",
+        available: true,
+      },
+      {
+        label: "Privacy",
+        body: "What the store holds about you, what it never sees, and how to have it removed.",
+        href: "/policies/privacy",
+        available: true,
+      },
+      {
+        label: "Terms",
+        body: "The rules that apply to an order: prices, payment and cancellation.",
+        href: "/policies/terms",
+        available: true,
+      },
     ],
   },
 
   /** Task 5 — FAQ. Only questions the current app can answer truthfully are
-   *  listed. Shipping times, return windows and delivery estimates are
-   *  deliberately absent until Tasks 15/21 define them. */
+   *  listed. Shipping times, the return window and delivery estimates are not
+   *  repeated here: they live in the policies (Tasks 15/21), so there is one
+   *  place to change the answer and no second version to drift. */
   faq: {
     heading: "Questions we get",
     items: [

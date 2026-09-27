@@ -96,7 +96,25 @@ remaining ChannelPlatform fields. To integrate: copy the module into the OpenShi
 checkout at `openship/features/integrations/channel/synthetic.ts` (that
 repository is separate and git-ignored here) and create a ChannelPlatform row
 named `synthetic` whose ten adapter-function fields all reference `synthetic`,
-then attach it to the staged channel. Behavior: purchases are accepted only for
+then attach it to the staged channel.
+
+Both boundary steps are now implemented in `store/lib/openship/setup.ts`, to run
+**after** stageLink/stageMatch (those require a platform-free channel):
+
+1. `ensureSyntheticChannelPlatform(request, { ownerId })` — reuses or creates the
+   operator's `ChannelPlatform` row named `synthetic` with all ten adapter slots
+   set to `"synthetic"` and no credentials. A same-name row with different slot
+   values is refused (it would silently point the channel at another adapter);
+   foreign-owned same-name rows are ignored; ambiguous duplicates fail without
+   writing. Returns `{ id, created }`.
+2. `attachSyntheticChannelPlatform(request, { ownerId, channelId, platformId })` —
+   verifies the platform row is the operator's synthetic adapter, then connects
+   it via OpenShip's own `updateChannel` mutation. Refuses a channel that already
+   carries a different platform; a repeated call returns `{ attached: false }`.
+   Attaching does **not** enable routing — the staged link's disabled filters
+   remain in place, so no orders route until an operator explicitly changes them.
+
+Behavior: purchases are accepted only for
 `syn_`-prefixed SKUs with positive integer quantities; purchase IDs and tracking
 numbers are SHA-256-derived and stable; re-submitting the same order returns the
 same purchase; `fulfillPurchase` is the explicit tracking transition; cancelled
@@ -117,9 +135,11 @@ The setup tests execute queries/mutations against the pinned generated schema at
 `c:\Users\lenovo\Desktop\yoo\openship\schema.graphql` with in-memory resolvers.
 The reference clone must exist. These tests validate GraphQL names/types and setup
 behavior, **not** live Keystone auth, hooks, database concurrency, or fulfillment.
-Latest unit run: 161 passing (33 OpenShip tests: transport 2, stageLink 7,
-ensureLocalChannel 2, stageMatch 16, ensureSourceShop 6). Typecheck still fails on
-existing project diagnostics (193, all pre-existing in the vendored `features/` tree);
+Latest unit run: 223 passing (16 files), including 45 setup tests:
+stageLink 7, ensureLocalChannel 2, stageMatch 16, ensureSourceShop 6,
+ensureSyntheticChannelPlatform 6, attachSyntheticChannelPlatform 8
+(incl. the full staged-flow test). Typecheck still fails on
+existing project diagnostics (all pre-existing in the vendored `features/` tree);
 none are in the OpenShip files. `npm run build` exits 0.
 
 ## Rollback and activation

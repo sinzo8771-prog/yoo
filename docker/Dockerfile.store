@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1
+# Task 24 — custom storefront production image.
+#
+# Repo-root build context (tracked Dockerfile; `store/` itself is tracked but the
+# other two images live beside it for one coherent deployment layout).
+#
+# Build runs the repository's own scripts: `npm run build` triggers `prebuild`
+# (prisma generate against prisma/openfront.prisma — codegen only, no database
+# connection) then `next build`, exactly like the CI production-build job.
+#
+# NEXT_PUBLIC_* values are INLINED INTO THE BUNDLE AT BUILD TIME, so they are
+# declared as ARGs here and passed by docker-compose.prod.yml from the host .env:
+# changing the backend URL or site URL requires rebuilding this image
+# (docs/ops/deployment.md §environment). SESSION_SECRET is also needed at build
+# (token helpers are imported during page data collection); the REAL secret is
+# supplied at runtime — placeholders default below and are what CI uses too.
+
+FROM node:24-bookworm-slim
+
+# Prisma (used by `prebuild` → prisma generate and by the seed scripts) needs
+# libssl/openssl; without it Prisma warns "failed to detect the libssl/openssl
+# version". Found during the Task 24 rehearsal.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Inlined-at-build public configuration (compose passes real values).
+ARG NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
+ARG NEXT_PUBLIC_SITE_URL=http://localhost:3000
+ARG NEXT_PUBLIC_DEFAULT_REGION=us
+ARG NEXT_PUBLIC_ANALYTICS_ENABLED=false
+ARG NEXT_PUBLIC_IMAGE_HOSTS=
+ARG NEXT_PUBLIC_STRIPE_KEY=
+ARG NEXT_PUBLIC_PAYPAL_CLIENT_ID=
+ARG NEXT_PUBLIC_PAYPAL_SANDBOX=
+# Build-only placeholders (codegen + build imports; never real credentials).
+ARG OPENFRONT_DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/openfront
+ARG SESSION_SECRET=build-placeholder-session-secret-0123456789abcdef
+ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL} \
+    NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL} \
+    NEXT_PUBLIC_DEFAULT_REGION=${NEXT_PUBLIC_DEFAULT_REGION} \
+    NEXT_PUBLIC_ANALYTICS_ENABLED=${NEXT_PUBLIC_ANALYTICS_ENABLED} \
+    NEXT_PUBLIC_IMAGE_HOSTS=${NEXT_PUBLIC_IMAGE_HOSTS} \
+    NEXT_PUBLIC_STRIPE_KEY=${NEXT_PUBLIC_STRIPE_KEY} \
+    NEXT_PUBLIC_PAYPAL_CLIENT_ID=${NEXT_PUBLIC_PAYPAL_CLIENT_ID} \
+    NEXT_PUBLIC_PAYPAL_SANDBOX=${NEXT_PUBLIC_PAYPAL_SANDBOX} \
+    OPENFRONT_DATABASE_URL=${OPENFRONT_DATABASE_URL} \
+    SESSION_SECRET=${SESSION_SECRET} \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+COPY store/package.json store/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY store/ ./
+# `npm run build` = prebuild (prisma generate) + next build — CI parity.
+RUN npm run build
+
+# Runtime port matches scripts/healthcheck.mjs / e2e defaults (store → 3000).
+ENV PORT=3000
+EXPOSE 3000
+
+# Runtime secrets (SESSION_SECRET, HIDE_OPENFRONT_BRANDING, SMTP, …) come from
+# docker-compose.prod.yml environment at container start — none are baked here.
+CMD ["npm", "start"]

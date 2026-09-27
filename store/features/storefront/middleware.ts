@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { openfrontClient } from "@/features/storefront/lib/config";
+import { isTrustedActionRequest } from "@/lib/security/csrf";
+import { applySecurityHeaders } from "@/lib/security/headers";
+import {
+  classifyRequest,
+  clientKeyFromHeaders,
+  edgeRateLimiter,
+  rateLimitHeaders,
+} from "@/lib/security/rate-limit";
 
 const DEFAULT_REGION = process.env.NEXT_PUBLIC_DEFAULT_REGION || "us";
 
@@ -90,9 +98,63 @@ async function getCountryCode(request: NextRequest, regionMap: Map<string, any>)
   }
 }
 
+/**
+ * Task 18 — ingress guards, applied before any storefront work happens.
+ *
+ * Reached from `store/proxy.ts` (Next.js 16's middleware entry), whose matcher
+ * excludes `/api`, `_next/*` and static asset paths; everything else — pages and
+ * server-action POSTs alike — passes through here first.
+ *
+ * Order matters: a cross-site server-action POST is refused outright (403) and
+ * only then is a bucket's budget spent (429), so forged cross-site requests
+ * cannot burn a victim's allowance. Both responses carry the standard security
+ * headers, and the limiter reports its state so operators can tell throttling
+ * apart from an outage (see `docs/ops/incident-runbook.md`).
+ */
+function guardRequest(request: NextRequest): NextResponse | null {
+  if (
+    !isTrustedActionRequest({
+      method: request.method,
+      nextAction: request.headers.get("next-action"),
+      origin: request.headers.get("origin"),
+      host: request.headers.get("host"),
+      forwardedHost: request.headers.get("x-forwarded-host"),
+      secFetchSite: request.headers.get("sec-fetch-site"),
+    })
+  ) {
+    const forbidden = new NextResponse("Forbidden", { status: 403 });
+    forbidden.headers.set("X-CSRF-Rejected", "1");
+    applySecurityHeaders(forbidden.headers);
+    return forbidden;
+  }
+
+  const bucket = classifyRequest({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+  });
+  if (!bucket) return null;
+
+  const verdict = edgeRateLimiter.consume(
+    bucket,
+    clientKeyFromHeaders((name) => request.headers.get(name))
+  );
+  if (verdict.allowed) return null;
+
+  const limited = new NextResponse("Too Many Requests", { status: 429 });
+  for (const [name, value] of Object.entries(rateLimitHeaders(verdict))) {
+    limited.headers.set(name, value);
+  }
+  applySecurityHeaders(limited.headers);
+  return limited;
+}
+
 // Handles country code redirects and cart management for storefront routes
 export async function handleStorefrontRoutes(request: NextRequest, user: any | null) {
   // User is passed from the main middleware only for dashboard routes
+
+  // Task 18: refuse cross-site server actions and over-budget sources first.
+  const guarded = guardRequest(request);
+  if (guarded) return guarded;
 
   const regionMap = await getRegionMap(request);
   const countryCode = await getCountryCode(request, regionMap);
@@ -116,10 +178,21 @@ export async function handleStorefrontRoutes(request: NextRequest, user: any | n
   if (cartId && !cartIdCookie) {
     const redirectUrl = `${request.nextUrl.href}&step=address`;
     response = NextResponse.redirect(redirectUrl);
+    // Task 18: explicit cookie policy. `httpOnly` is deliberately NOT set: the
+    // legacy client cart hook reads this cookie, and its value is a cart proof
+    // that the server re-verifies on every mutation, so a forged value fails
+    // closed. `SameSite=Lax` (not Strict) so returning from an off-site payment
+    // redirect still sends it.
     response.cookies.set("_openfront_cart_id", cartId, {
       maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
     });
   }
+
+  // Task 18: every storefront response leaves with the security header set.
+  applySecurityHeaders(response.headers);
 
   return response;
 }

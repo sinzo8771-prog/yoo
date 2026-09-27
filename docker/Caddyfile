@@ -1,0 +1,20 @@
+# Task 24 — Caddy edge (HTTPS). Mounted read-only by docker-compose.prod.yml.
+#
+# Domains arrive as env vars from the root .env, so this file stays secret- and
+# environment-free. Caddy handles ACME issuance + renewal on :80/:443 once DNS
+# A/AAAA records for {$STORE_DOMAIN}/{$API_DOMAIN} point at this host; HTTP→HTTPS
+# redirection is implicit (automatic_https on).
+#
+# Only two sites are exposed:
+#   {$STORE_DOMAIN} → custom storefront (store:3000)
+#   {$API_DOMAIN}   → Openfront GraphQL/API (openfront:3001)
+# OpenShip is deliberately NOT proxied: fulfillment admin stays on
+# 127.0.0.1:3002 behind an SSH tunnel (deployment.md §3).
+
+{$STORE_DOMAIN} {
+	reverse_proxy store:3000
+}
+
+{$API_DOMAIN} {
+	reverse_proxy openfront:3001
+}

@@ -92,6 +92,7 @@ const PRODUCT_FIELDS = gql`
       image {
         url
       }
+      imagePath
       altText
       order
     }
@@ -132,6 +133,9 @@ type RawProduct = {
   description: { document: unknown } | null;
   productImages: Array<{
     image: { url: string } | null;
+    /** Root-relative path served by this deployment (Task 22 media has no
+     *  uploaded storage asset, so `image` is null and this is the URL). */
+    imagePath: string | null;
     altText: string | null;
     order: number | null;
   }> | null;
@@ -215,9 +219,14 @@ function mapProduct(raw: RawProduct): CatalogProduct {
     throw new CatalogClientError("Malformed product record: missing id/handle");
   }
 
-  const images = (raw.productImages ?? []).flatMap((i) =>
-    i?.image?.url ? [{ url: i.image.url, alt: i.altText ?? undefined }] : []
-  );
+  // Prefer the backend's stored asset URL; fall back to `imagePath`, which is
+  // what the backend's own thumbnail virtual field does — Task 22 media rows
+  // set `imagePath` only (no uploaded asset), so without the fallback the PDP
+  // gallery would render empty while cards showed a thumbnail.
+  const images = (raw.productImages ?? []).flatMap((i) => {
+    const url = i?.image?.url || i?.imagePath || "";
+    return url.length > 0 ? [{ url, alt: i.altText ?? undefined }] : [];
+  });
 
   const descriptionDocument = raw.description?.document;
   const description = documentToPlainText(descriptionDocument);
@@ -262,6 +271,56 @@ async function requestCatalog<T>(
     if (err instanceof CatalogClientError) throw err;
     throw new CatalogClientError("Openfront request failed", { cause: err });
   }
+}
+
+/**
+ * Task 19, Step 2 — identifiers only, for the sitemap.
+ *
+ * The sitemap needs handles, not prices, images or descriptions, so this query
+ * selects two scalar lists instead of running the full product projection over
+ * the whole catalog. Published products only: a draft must never be advertised
+ * to a crawler. Results are memoised like every other read and bounded by
+ * `limit` (the sitemap has its own hard cap on top of this).
+ */
+export type CatalogIndex = {
+  productHandles: string[];
+  collectionHandles: string[];
+};
+
+export const MAX_INDEX_HANDLES = 1000;
+
+export function listIndexableCatalog(
+  limit: number = MAX_INDEX_HANDLES
+): Promise<CatalogIndex> {
+  const bounded = Math.min(Math.max(Math.trunc(limit), 1), MAX_INDEX_HANDLES);
+  return cached(`catalog:index:${bounded}`, () => loadIndexableCatalog(bounded));
+}
+
+async function loadIndexableCatalog(limit: number): Promise<CatalogIndex> {
+  const query = gql`
+    query CatalogIndex($where: ProductWhereInput!, $limit: Int!) {
+      products(where: $where, take: $limit, orderBy: [{ createdAt: desc }]) {
+        handle
+      }
+      productCollections(take: $limit) {
+        handle
+      }
+    }
+  `;
+  const data = await requestCatalog<{
+    products: Array<{ handle: string | null }>;
+    productCollections: Array<{ handle: string | null }>;
+  }>(query, { where: { status: { equals: PUBLISHED } }, limit });
+
+  const handles = (rows: Array<{ handle: string | null }> | null | undefined) =>
+    (rows ?? [])
+      .map((row) => row?.handle)
+      .filter((handle): handle is string => typeof handle === "string" && handle.length > 0);
+
+  return {
+    productHandles: handles(data?.products),
+    collectionHandles: handles(data?.productCollections),
+  };
 }
 
 /** Featured products: published, newest first, limited. */

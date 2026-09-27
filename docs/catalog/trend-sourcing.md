@@ -77,12 +77,17 @@ countertop scale, so it is a same-niche addition rather than a category jump.
   monthly membership line item, but says nothing about whether it stocks this
   item or at what price.
 - **No SKU mapping.** `DEV-CROCK-5` / `DEV-CROCK-7` are placeholders, not
-  supplier SKUs, and both variants are manual-fulfillment until **Task 22, Step 3**
-  maps them 1:1 or records an explicit manual rule.
-- **No media.** **Task 22, Step 4** (dimensions, alt text, file size, licence
-  record) is untouched — the fixture stores no images at all.
+  supplier SKUs. Both variants are manual-fulfillment: since **Task 22, Step 3**
+  that is an *explicit* rule with a buy-note, recorded in
+  `ProductVariant.metadata.fulfillment`, not an absence — but no supplier SKU is
+  mapped yet, and `sourcing` is still `pending` for all 21 catalog variants.
+- **No media in this fixture.** The `devfix_` fixture still stores no images.
+  **Task 22, Step 4** now covers the production catalog (`nwg_`): 24 generated,
+  licensed, honestly-labelled images with dimensions/alt text/file size/source
+  checked against the bytes on disk — see `docs/catalog/media-sources.md`.
 - Title, subtitle and description are **original merchandising copy** written for
-  this fixture (**Task 22, Step 2**), not supplier copy.
+  this store (**Task 22, Step 2**), not supplier copy.
+
 
 ## Status and next steps
 
@@ -99,6 +104,27 @@ countertop scale, so it is a same-niche addition rather than a category jump.
   interest does not hold.
 - The catalog ceiling stays 10–30 products in one niche (**Task 22, Step 1**);
   this fixture product does not authorise expansion beyond it.
+
+## Since Task 22 (2026-09-25)
+
+This file remains the record of **why this niche**, gathered 2026-09-17 from the
+sources indexed below. Task 22 then built the production catalog on top of that
+reasoning, in a separate namespace:
+
+- `nwg_` — the production-shaped catalog: 12 products in this same niche
+  (stoneware / oak / washed linen, kitchen & table), 21 variants, 4 collections,
+  24 media files. Seeder `npm run seed:catalog`, media `npm run media:catalog`,
+  contract `npm run validate:catalog [-- --strict]`. Detail:
+  `docs/catalog/product-model.md` and `docs/catalog/media-sources.md`.
+- `devfix_` — this fixture, unchanged, still `npm run seed:dev`. The two
+  namespaces coexist; neither seeder deletes the other's rows.
+- This record's product *did* make it into the production catalog, but as a
+  **re-specification, not a copy**: `stoneware-utensil-crock` in `products.ts`
+  carries its own `NWG-CROCK-5` / `NWG-CROCK-7` SKUs, its own price and its own
+  original copy. The research above justifies the niche and the shape; it does
+  not carry over a price, a supplier, or a stock claim — and since the
+  storage/organiser signal is still unverified against real demand, the 30-day
+  re-check applies to the niche rather than to any listing.
 
 ## Source index
 

@@ -2,22 +2,17 @@
 
 import { gql } from 'graphql-request';
 import { openfrontClient } from '../config';
-
-interface Store {
-  id: string;
-  name: string;
-  defaultCurrencyCode: string;
-  homepageTitle?: string;
-  homepageDescription?: string;
-  logoIcon?: string;
-  logoColor?: string;
-  metadata?: any;
-}
+import { parseStoreRecord, type StoreRecord } from '@/lib/security/schemas';
 
 /**
- * Get the first store (assumes single store setup)
+ * Get the first store (assumes single store setup).
+ *
+ * The response is untrusted input at an API boundary, so it is schema-validated
+ * (Task 18) before any field is used: a record that fails validation, or an
+ * upstream failure, returns null and every consumer falls back to `lib/brand`
+ * defaults instead of rendering values it cannot vouch for.
  */
-export async function getStore(): Promise<Store | null> {
+export async function getStore(): Promise<StoreRecord | null> {
   const query = gql`
     query GetStore {
       stores(take: 1) {
@@ -35,12 +30,10 @@ export async function getStore(): Promise<Store | null> {
 
   try {
     const response = await openfrontClient.request(query);
+    const record = response?.stores?.[0];
+    if (!record) return null;
 
-    if (response.stores && response.stores.length > 0) {
-      return response.stores[0];
-    }
-
-    return null;
+    return parseStoreRecord(record);
   } catch (error) {
     console.error('Error fetching store:', error);
     return null;

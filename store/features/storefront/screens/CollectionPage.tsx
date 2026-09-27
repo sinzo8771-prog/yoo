@@ -3,8 +3,12 @@ import type { Metadata } from 'next';
 import type { SortOptions } from '@/features/storefront/modules/store/components/refinement-list/sort-products'; // Use @ alias
 import { notFound } from "next/navigation"
 
+import { TrackEvent } from "@/components/analytics/TrackEvent"
+import { getBaseUrl } from "@/features/storefront/lib/getBaseUrl"
 import { getCollectionByHandle } from "@/features/storefront/lib/data/collections"
 import CollectionTemplate from "@/features/storefront/modules/collections/templates"
+import { buildMetadata } from "@/lib/seo/metadata"
+import { collectionPath } from "@/lib/seo/routes"
 
 // Type alias for props
 type Props = {
@@ -48,12 +52,14 @@ export async function generateMetadata(props: Props): Promise<Metadata> {
     notFound()
   }
 
-  const metadata = {
-    title: `${collection.title}`,
-    description: `${collection.title} collection`,
-  } as Metadata
-
-  return metadata
+  // Task 19, Step 1: merchant title, a canonical built from the shared route
+  // helper, and nothing invented for a collection with no title.
+  return buildMetadata({
+    title: collection.title,
+    description: collection.title ? `${collection.title} collection` : null,
+    path: collectionPath(params.handle),
+    origin: process.env.NEXT_PUBLIC_SITE_URL ?? (await getBaseUrl()),
+  })
 }
 
 export async function CollectionPage(props: Props) {
@@ -69,11 +75,18 @@ export async function CollectionPage(props: Props) {
   }
 
   return (
-    <CollectionTemplate
-      collection={collection}
-      page={page}
-      sortBy={sortBy}
-      countryCode={params.countryCode}
-    />
+    <>
+      {/* Task 19, Step 3: funnel stage — collection view. */}
+      <TrackEvent
+        event="view_collection"
+        props={{ collectionHandle: params.handle }}
+      />
+      <CollectionTemplate
+        collection={collection}
+        page={page}
+        sortBy={sortBy}
+        countryCode={params.countryCode}
+      />
+    </>
   )
 }

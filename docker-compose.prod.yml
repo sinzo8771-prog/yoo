@@ -1,0 +1,239 @@
+# Task 24 â€” production stack (self-hosted Docker, plan tech stack line 9).
+#
+# Separate project name (`yoo-prod`) so this stack NEVER collides with the dev
+# stack (docker-compose.yml, project "yoo") on the same machine: distinct
+# containers, networks and volumes. Run with:
+#   docker compose -f docker-compose.prod.yml up -d
+# (the dev docker-compose.override.yml is NOT applied when -f is used).
+#
+# Topology â€” two networks for blast-radius control:
+#   edge  : Caddy â‡„ apps (Caddy is the only service publishing 80/443)
+#   data  : apps â‡„ postgres (postgres has NO edge membership, only loopback admin)
+# Apps also publish 127.0.0.1:300x for host-side health checks and the
+# synthetic e2e gate (docs/ops/deployment.md Â§8/Â§9); never expose those wider.
+#
+# All ${VARS} are read from the root .env (gitignored â€” create from .env.example).
+# `:?` makes required secrets fail the whole `compose config/up` loudly instead
+# of booting a stack with an empty password.
+
+name: yoo-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env â€” copy .env.example}
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # First boot creates the openfront + openship databases (tracked script).
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    # Admin/seeder access only â€” loopback binding, same rationale as the dev
+    # override's 5433. Production tooling (seeds, psql, one-off restores) runs
+    # from this host; the internet never sees 5432.
+    ports:
+      - "127.0.0.1:5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - data
+
+  # Nightly pg_dump sidecar (plan Task 24 Step 1 â€” "use backups â€¦ appropriate
+  # to the provider"). Runs one backup at boot (so a green container MEANS a
+  # backup exists) then every 24h, pruning beyond BACKUP_KEEP_DAYS.
+  # Files land in ./backups on the host â€” copy them off-box (see deployment.md).
+  postgres-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Gate on the APPS being healthy, not just postgres: migrations run at
+      # app container start (`npm run migrate && npm start`), so waiting for
+      # openfront+openship healthy guarantees the boot backup captures the
+      # MIGRATED schema. Without this, the first backup of a fresh deployment
+      # dumps an empty database (found and fixed during Task 24 rehearsal).
+      openfront:
+        condition: service_healthy
+      openship:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env â€” copy .env.example}
+      BACKUP_DIR: /backups
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+    volumes:
+      - ./backups:/backups
+      - ./docker/postgres-backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    networks:
+      - data
+
+  openfront:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openfront
+      args:
+        # Inlined into the openfront dashboard client bundle at build time â€”
+        # must be the PUBLIC api origin in production (rebuild when it changes).
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:?set NEXT_PUBLIC_BACKEND_URL in .env}
+        NEXT_PUBLIC_DEFAULT_REGION: ${NEXT_PUBLIC_DEFAULT_REGION:-us}
+    # Tagged so rollback can retag :previous back to :latest (rollback.md).
+    image: yoo-openfront:${DEPLOY_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      # Prisma pooling: connection_limit bounds THIS app's pool; keep
+      # (openfront_limit + openship_limit) well under postgres max_connections
+      # (100 default) â€” docs/ops/deployment.md Â§1 has the math.
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/openfront?connection_limit=10
+      # Cart-proof signing â€” MUST stay byte-identical to the store's value
+      # (both come from the same root .env entry; parity check in deployment.md Â§6).
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:?set NEXT_PUBLIC_BACKEND_URL in .env}
+      NEXT_PUBLIC_DEFAULT_REGION: ${NEXT_PUBLIC_DEFAULT_REGION:-us}
+      # Required at boot: features/keystone/index.ts productionEnv() throws when
+      # NODE_ENV=production and any S3_* is missing (storage-less placeholders OK).
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:?set S3_* in .env â€” placeholder is fine without media}
+      S3_REGION: ${S3_REGION:?set S3_* in .env}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_* in .env}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_* in .env}
+      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_* in .env}
+    ports:
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      # GraphQL liveness — POST {__typename} with no credentials, same probe
+      # scripts/healthcheck.mjs runs, executed inside the image (node is present).
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/api/graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'{__typename}'})}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - edge
+      - data
+
+  openship:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openship
+      args:
+        NEXT_PUBLIC_URL: ${OPENSHIP_PUBLIC_URL:-http://localhost:3002}
+    image: yoo-openship:${DEPLOY_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3002"
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/openship?connection_limit=10
+      # Distinct from SESSION_SECRET: openship sessions are a separate trust
+      # domain from the storeâ†”openfront cart-proof secret (.env.example notes).
+      SESSION_SECRET: ${OPENSHIP_SESSION_SECRET:?set OPENSHIP_SESSION_SECRET in .env}
+      NEXT_PUBLIC_URL: ${OPENSHIP_PUBLIC_URL:-http://localhost:3002}
+      OAUTH_STATE_SECRET: ${OAUTH_STATE_SECRET:?set OAUTH_STATE_SECRET in .env}
+      # CJ_* supplier credentials are deliberately ABSENT here: the plan forbids
+      # connecting supplier credentials before the synthetic gate passes, and
+      # cj.ts fails closed without them. Add them via .env for Task 24 Step 10.
+    ports:
+      # Loopback only â€” the fulfillment dashboard is reached over an SSH tunnel
+      # (deployment.md Â§3), never proxied through Caddy.
+      - "127.0.0.1:3002:3002"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3002/api/graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'{__typename}'})}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - edge
+      - data
+
+  store:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.store
+      args:
+        # NEXT_PUBLIC_* are inlined into the bundle at build time â€” these are
+        # the values the BROWSER and the server-render both see. Rebuild the
+        # image when any of them change (deployment.md Â§6).
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:?set NEXT_PUBLIC_BACKEND_URL in .env}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?set NEXT_PUBLIC_SITE_URL in .env}
+        NEXT_PUBLIC_DEFAULT_REGION: ${NEXT_PUBLIC_DEFAULT_REGION:-us}
+        NEXT_PUBLIC_ANALYTICS_ENABLED: ${NEXT_PUBLIC_ANALYTICS_ENABLED:-false}
+        NEXT_PUBLIC_IMAGE_HOSTS: ${NEXT_PUBLIC_IMAGE_HOSTS:-}
+        NEXT_PUBLIC_STRIPE_KEY: ${NEXT_PUBLIC_STRIPE_KEY:-}
+        NEXT_PUBLIC_PAYPAL_CLIENT_ID: ${NEXT_PUBLIC_PAYPAL_CLIENT_ID:-}
+        NEXT_PUBLIC_PAYPAL_SANDBOX: ${NEXT_PUBLIC_PAYPAL_SANDBOX:-}
+    image: yoo-store:${DEPLOY_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      HIDE_OPENFRONT_BRANDING: ${HIDE_OPENFRONT_BRANDING:-true}
+      # Server-side fallbacks (NEXT_PUBLIC_* above are already baked in).
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:?set NEXT_PUBLIC_BACKEND_URL in .env}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?set NEXT_PUBLIC_SITE_URL in .env}
+      # OPENFRONT_DATABASE_URL is intentionally NOT set on the running service:
+      # it is seeder-only (store/.env.example) â€” pass it to one-off seeds via
+      #   docker compose run --rm -e OPENFRONT_DATABASE_URL=â€¦ store npm run seed:â€¦
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - edge
+      - data
+
+  # Edge proxy â€” HTTPS with automatic ACME. Only starts with the profile:
+  #   docker compose -f docker-compose.prod.yml --profile edge up -d
+  # Local rehearsal runs WITHOUT it (apps are reachable on loopback); the first
+  # production cutover enables it once DNS A records point at this host.
+  caddy:
+    profiles: ["edge"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      store:
+        condition: service_healthy
+      openfront:
+        condition: service_healthy
+    environment:
+      STORE_DOMAIN: ${STORE_DOMAIN:?set STORE_DOMAIN in .env (e.g. shop.example.com)}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env (e.g. api.example.com)}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+
+networks:
+  edge:
+  data:
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

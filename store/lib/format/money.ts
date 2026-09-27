@@ -28,6 +28,30 @@ export function toMajorUnits(
 }
 
 /**
+ * Convert a major-unit amount (the shape Openfront returns for `order.total`,
+ * e.g. `"45.00"`) into the minor units the analytics funnel and JSON-LD expect.
+ *
+ * Returns `undefined` for anything that is not a plain non-negative number —
+ * a missing total is omitted, never reported as a fabricated `0`.
+ */
+export function toMinorUnits(
+  amount: string | number | null | undefined,
+  currencyCode?: string | null
+): number | undefined {
+  if (amount === null || amount === undefined) return undefined;
+
+  const normalized =
+    typeof amount === "number" ? String(amount) : String(amount).trim().replace(/,/g, "");
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return undefined;
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return undefined;
+
+  const minor = isZeroDecimalCurrency(currencyCode) ? parsed : parsed * 100;
+  return Math.round(minor);
+}
+
+/**
  * Format a minor-unit amount as a localized currency string.
  * Returns `null` for missing/invalid input so callers can decide what to render
  * rather than printing a misleading "0".

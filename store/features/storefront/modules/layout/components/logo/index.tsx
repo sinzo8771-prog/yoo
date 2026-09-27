@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils';
 import { Tektur } from 'next/font/google';
 import LocalizedClientLink from '@/features/storefront/modules/common/components/localized-client-link';
 import { getStore } from '@/features/storefront/lib/data/store';
+import { safeCssAngle, sanitizeSvg } from '@/lib/security/markup';
 import { site } from '@/lib/brand/site';
 
 const tektur = Tektur({
@@ -17,8 +18,10 @@ const DEFAULT_LOGO = '<svg fill="none" height="100%" viewBox="0 0 44 48" width="
 export default async function Logo() {
   const store = await getStore();
   const storeName = site.name || store?.name || 'Store';
-  const logoSvg = store?.logoIcon || DEFAULT_LOGO;
-  const logoColor = store?.logoColor || '0';
+  // Task 18: both fields are operator-configurable, so the SVG is sanitized and
+  // the angle clamped before they reach `dangerouslySetInnerHTML` / CSS.
+  const logoSvg = sanitizeSvg(store?.logoIcon) ?? DEFAULT_LOGO;
+  const logoColor = safeCssAngle(store?.logoColor);
 
   return (
     <LocalizedClientLink

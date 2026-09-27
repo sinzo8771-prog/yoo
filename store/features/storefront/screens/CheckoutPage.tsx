@@ -1,20 +1,22 @@
-import { notFound } from "next/navigation";
+import { TrackEvent } from "@/components/analytics/TrackEvent"
+import { retrieveCart } from "@/features/storefront/lib/data/cart";
+import { getUser } from "@/features/storefront/lib/data/user";
+import { buildPrivateMetadata } from "@/lib/seo/metadata";
 import Wrapper from "@/features/storefront/modules/checkout/components/payment-wrapper";
 import CheckoutForm from "@/features/storefront/modules/checkout/templates/checkout-form";
 import CheckoutSummary from "@/features/storefront/modules/checkout/templates/checkout-summary";
-import { retrieveCart } from "@/features/storefront/lib/data/cart";
-import { getUser } from "@/features/storefront/lib/data/user";
 import React from "react"
 import LocalizedClientLink from "@/features/storefront/modules/common/components/localized-client-link"
 import ChevronDown from "@/features/storefront/modules/common/icons/chevron-down"
 import OpenfrontCTA from "@/features/storefront/modules/layout/components/openfront-cta"
 import Logo from "@/features/storefront/modules/layout/components/logo"
 import InteractiveLink from "@/features/storefront/modules/common/components/interactive-link"
-import { Metadata } from "next"
+import { notFound } from "next/navigation";
+import type { Metadata } from "next"
 
-export const metadata = {
-  title: "Checkout",
-};
+// Task 19, Steps 1 + 2: the checkout is transactional — `noindex`, and excluded
+// from the sitemap and from robots crawling.
+export const metadata = buildPrivateMetadata("Checkout");
 
 const fetchCart = async () => {
   const cart = await retrieveCart();
@@ -32,6 +34,8 @@ export async function CheckoutPage() {
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-[1fr_416px] max-w-[1440px] w-full mx-auto px-6 gap-y-8 sm:gap-x-12 xl:gap-x-40 py-12">
+      {/* Task 19, Step 3: funnel stage — checkout entered. */}
+      <TrackEvent event="begin_checkout" />
       <Wrapper cart={cart}>
         <CheckoutForm cart={cart} customer={customer} />
       </Wrapper>

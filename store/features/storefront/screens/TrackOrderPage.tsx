@@ -1,12 +1,14 @@
-import { Metadata } from "next"
-import { redirect } from "next/navigation"
-import { Input } from "@/components/ui/input"
+import { TrackEvent } from "@/components/analytics/TrackEvent"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { buildPrivateMetadata } from "@/lib/seo/metadata"
+import { redirect } from "next/navigation"
 
-export const metadata: Metadata = {
-  title: "Track order",
-  description: "Look up the status of a recent order.",
-}
+/**
+ * Task 19, Steps 1 + 2: a lookup form with no content of its own — `noindex`
+ * and excluded from the sitemap.
+ */
+export const metadata = buildPrivateMetadata("Track order")
 
 /**
  * Task 8, Step 2 — safe order lookup entry point for guests.
@@ -46,6 +48,8 @@ export async function TrackOrderPage({ params, searchParams }: TrackOrderPagePro
 
   return (
     <div className="flex flex-col items-center w-full px-6 py-12">
+      {/* Task 19, Step 3: funnel/diagnostic event — someone started a lookup. */}
+      <TrackEvent event="view_tracking" />
       <div className="w-full max-w-md flex flex-col gap-y-6">
         <div>
           <h1 className="text-2xl font-semibold">Track your order</h1>

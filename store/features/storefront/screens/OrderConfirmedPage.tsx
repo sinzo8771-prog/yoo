@@ -1,6 +1,8 @@
+import { TrackEvent } from "@/components/analytics/TrackEvent"
 import { retrieveOrder } from "@/features/storefront/lib/data/orders"
 import OrderCompletedTemplate from "@/features/storefront/modules/order/templates/order-completed-template"
-import { Metadata } from "next"
+import { toMinorUnits } from "@/lib/format/money"
+import { buildPrivateMetadata } from "@/lib/seo/metadata"
 import { notFound } from "next/navigation"
 import type { StoreOrder } from "@/features/storefront/types/storefront"
 import SkeletonOrderConfirmed from "@/features/storefront/modules/skeletons/templates/skeleton-order-confirmed"
@@ -11,10 +13,11 @@ type Props = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
-export const metadata: Metadata = {
-  title: "Order Confirmed",
-  description: "You purchase was successful",
-}
+/**
+ * Task 19, Steps 1 + 2: an order confirmation is personal. It is `noindex`, it is
+ * not in the sitemap, and robots disallows the whole `/order` prefix.
+ */
+export const metadata = buildPrivateMetadata("Order Confirmed")
 
 // Update function signature to accept searchParams
 export async function OrderConfirmedPage({ params: paramsPromise, searchParams: searchParamsPromise }: Props) {
@@ -31,7 +34,28 @@ export async function OrderConfirmedPage({ params: paramsPromise, searchParams: 
     return notFound()
   }
 
-  return <OrderCompletedTemplate order={order} />
+  /*
+    Task 19, Step 3 + 4: two observations of the same conversion.
+      - `checkout_success` is the provider-confirmation side;
+      - `purchase` is the funnel stage that feeds the conversion measure.
+    Only the currency and a minor-unit total are sent — never the order id, the
+    customer email or the shipping address. `toMinorUnits` returns undefined for
+    an absent/unparseable total, so no fabricated revenue is ever reported.
+  */
+  const currency = order.region?.currency?.code ?? undefined
+  const valueMinor = toMinorUnits(order.total, currency)
+  const conversionProps = {
+    ...(currency ? { currency } : {}),
+    ...(valueMinor !== undefined ? { valueMinor } : {}),
+  }
+
+  return (
+    <>
+      <TrackEvent event="checkout_success" props={conversionProps} />
+      <TrackEvent event="purchase" props={conversionProps} />
+      <OrderCompletedTemplate order={order} />
+    </>
+  )
 }
 
 export function OrderConfirmedLoading() {

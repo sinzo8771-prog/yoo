@@ -1,19 +1,32 @@
+import { TrackEvent } from "@/components/analytics/TrackEvent"
 import CartTemplate from "@/features/storefront/modules/cart/templates"
 import { retrieveCart } from "@/features/storefront/lib/data/cart"
 import { getUser } from "@/features/storefront/lib/data/user"
 import SkeletonCartPage from "@/features/storefront/modules/skeletons/templates/skeleton-cart-page"
 import InteractiveLink from "@/features/storefront/modules/common/components/interactive-link"
+import { buildPrivateMetadata } from "@/lib/seo/metadata"
 
-export const metadata = {
-  title: "Cart",
-  description: "View your cart",
-}
+/**
+ * Task 19, Steps 1 + 2: the cart is a personal, transactional page — `noindex`
+ * in the document, and deliberately excluded from the sitemap and robots.
+ */
+export const metadata = buildPrivateMetadata("Cart")
 
 export async function CartPage() {
   const cart = await retrieveCart()
   const user = await getUser()
 
-  return <CartTemplate cart={cart} user={user} />
+  return (
+    <>
+      {/*
+        Task 19, Step 3: funnel stage — cart view. No props by design: the cart
+        shape carries no identifiers we need, and item counts are not worth the
+        extra dependency on the legacy cart payload.
+      */}
+      <TrackEvent event="view_cart" />
+      <CartTemplate cart={cart} user={user} />
+    </>
+  )
 }
 
 export function CartLoading() {

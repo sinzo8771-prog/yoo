@@ -18,6 +18,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useId } from "react";
 import type { CatalogProduct, CatalogVariant } from "@/lib/openfront/catalog";
+import { track } from "@/lib/analytics/client";
 
 export function VariantSelector({
   product,
@@ -54,6 +55,9 @@ export function VariantSelector({
   const onSelect = (variant: CatalogVariant) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSelected(value);
+    // Task 19, Step 3: recorded on the visitor's action, not on render — a
+    // preselected default variant is not a selection the visitor made.
+    track("select_variant", { productId: product.id, variantId: value });
     const url = new URLSearchParams(searchParams?.toString() ?? "");
     url.set("variant", value);
     router.replace(`?${url.toString()}`, { scroll: false });

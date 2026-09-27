@@ -160,6 +160,140 @@ export async function ensureSourceShop(
   }
   return { id: result.createShop.id, created: true };
 }
+// Task 11: the synthetic adapter is reached only through OpenShip's supported
+// adapter boundary — a ChannelPlatform row whose ten adapter-function slots all
+// name the `synthetic` module in features/integrations/channel/. No routing
+// code is modified; the platform row is data, not a hard-coded provider.
+const SYNTHETIC_SLOTS = [
+  "searchProductsFunction",
+  "getProductFunction",
+  "createPurchaseFunction",
+  "createWebhookFunction",
+  "oAuthFunction",
+  "oAuthCallbackFunction",
+  "createTrackingWebhookHandler",
+  "cancelPurchaseWebhookHandler",
+  "getWebhooksFunction",
+  "deleteWebhookFunction",
+] as const;
+type SyntheticSlot = (typeof SYNTHETIC_SLOTS)[number];
+type SyntheticPlatformRow = { id: string; user: { id: string } | null } & {
+  name: string | null;
+} & Partial<Record<SyntheticSlot, string | null>>;
+const SYNTHETIC_PLATFORM_FIELDS = `id user { id } name ${SYNTHETIC_SLOTS.join(" ")}`;
+const isSyntheticRow = (row: SyntheticPlatformRow) =>
+  row.name === "synthetic" &&
+  SYNTHETIC_SLOTS.every(slot => row[slot] === "synthetic");
+
+/**
+ * Reuse or create the operator's synthetic channel platform — the adapter
+ * boundary for the Task 11 fulfillment channel. The row carries no credentials
+ * and every slot resolves to the local `synthetic` adapter module. A same-name
+ * row with different slot values is refused (it would silently point the
+ * channel at a different adapter); same-name rows owned by other operators are
+ * ignored. Sequential repeats are safe; callers must serialize provisioning
+ * across processes. Attaching the platform is a separate, last step.
+ */
+export async function ensureSyntheticChannelPlatform(
+  request: OpenShipRequest,
+  input: { ownerId: string },
+): Promise<{ id: string; created: boolean }> {
+  if (typeof input.ownerId !== "string" || !input.ownerId.trim()) {
+    throw new Error("Owner ID is required.");
+  }
+  const state = await request<{
+    authenticatedItem: { id: string } | null;
+    channelPlatforms: SyntheticPlatformRow[] | null;
+  }>(`query EnsureSyntheticPlatform($name: String!) {
+    authenticatedItem { ... on User { id } }
+    channelPlatforms(where: { name: { equals: $name } }) { ${SYNTHETIC_PLATFORM_FIELDS} }
+  }`, { name: "synthetic" });
+  if (state.authenticatedItem?.id !== input.ownerId) {
+    throw new Error("OpenShip ownership check failed.");
+  }
+  if (!Array.isArray(state.channelPlatforms)) {
+    throw new Error("OpenShip returned invalid channel platform data.");
+  }
+  const owned = state.channelPlatforms.filter(row => row.user?.id === input.ownerId);
+  if (owned.length > 1) {
+    throw new Error("Multiple channel platforms share this name; resolve the conflict before provisioning.");
+  }
+  if (owned.length === 1) {
+    if (!isSyntheticRow(owned[0])) {
+      throw new Error("An existing same-name platform has different adapter functions; refusing to reuse it.");
+    }
+    return { id: owned[0].id, created: false };
+  }
+  const result = await request<{ createChannelPlatform: SyntheticPlatformRow | null }>(
+    `mutation EnsureSyntheticPlatform($data: ChannelPlatformCreateInput!) {
+      createChannelPlatform(data: $data) { ${SYNTHETIC_PLATFORM_FIELDS} }
+    }`,
+    { data: { name: "synthetic", ...Object.fromEntries(SYNTHETIC_SLOTS.map(slot => [slot, "synthetic"])) } },
+  );
+  if (!result.createChannelPlatform || !isSyntheticRow(result.createChannelPlatform) ||
+      result.createChannelPlatform.user?.id !== input.ownerId) {
+    throw new Error("OpenShip platform provisioning could not be verified; inspect state before retrying.");
+  }
+  return { id: result.createChannelPlatform.id, created: true };
+}
+
+/**
+ * Attach the verified synthetic platform to the staged channel — the final
+ * Task 11 boundary step, performed through OpenShip's own updateChannel
+ * mutation. Refuses when the channel already carries a different platform, when
+ * the target platform row is missing, foreign-owned, or not the synthetic
+ * adapter. Attaching does NOT enable routing: the staged link's filters stay
+ * disabled and no orders route until an operator changes them. Run after
+ * stageLink/stageMatch — those require a platform-free channel.
+ */
+export async function attachSyntheticChannelPlatform(
+  request: OpenShipRequest,
+  input: { ownerId: string; channelId: string; platformId: string },
+): Promise<{ channelId: string; platformId: string; attached: boolean }> {
+  if (Object.values(input).some(value => typeof value !== "string" || !value.trim())) {
+    throw new Error("Owner, channel, and platform IDs are required.");
+  }
+  const state = await request<{
+    authenticatedItem: { id: string } | null;
+    channel: (Owned & { platform: { id: string } | null }) | null;
+    channelPlatform: SyntheticPlatformRow | null;
+  }>(`query AttachSyntheticPlatform($channelId: ID!, $platformId: ID!) {
+    authenticatedItem { ... on User { id } }
+    channel(where: { id: $channelId }) { id user { id } platform { id } }
+    channelPlatform(where: { id: $platformId }) { ${SYNTHETIC_PLATFORM_FIELDS} }
+  }`, { channelId: input.channelId, platformId: input.platformId });
+  if (state.authenticatedItem?.id !== input.ownerId ||
+      state.channel?.id !== input.channelId || state.channel.user?.id !== input.ownerId) {
+    throw new Error("OpenShip ownership check failed.");
+  }
+  if (!state.channelPlatform || state.channelPlatform.user?.id !== input.ownerId) {
+    throw new Error("Target platform row was not found for this operator.");
+  }
+  if (!isSyntheticRow(state.channelPlatform)) {
+    throw new Error("Target platform is not the synthetic adapter; refusing to attach.");
+  }
+  if (state.channel.platform) {
+    if (state.channel.platform.id === input.platformId) {
+      return { channelId: input.channelId, platformId: input.platformId, attached: false };
+    }
+    throw new Error("Channel already carries a different platform; no changes made.");
+  }
+  const result = await request<{ updateChannel: { id: string; platform: { id: string; createPurchaseFunction: string | null } | null } | null }>(
+    `mutation AttachSyntheticPlatform($channelId: ID!, $platformId: ID!) {
+      updateChannel(where: { id: $channelId }, data: { platform: { connect: { id: $platformId } } }) {
+        id platform { id createPurchaseFunction }
+      }
+    }`,
+    { channelId: input.channelId, platformId: input.platformId },
+  );
+  if (!result.updateChannel || result.updateChannel.id !== input.channelId ||
+      result.updateChannel.platform?.id !== input.platformId ||
+      result.updateChannel.platform?.createPurchaseFunction !== "synthetic") {
+    throw new Error("OpenShip platform attachment could not be verified; inspect state before retrying.");
+  }
+  return { channelId: input.channelId, platformId: input.platformId, attached: true };
+}
+
 
 type ItemRef = { productId: string; variantId: string };
 type StagedMatch = Owned & {

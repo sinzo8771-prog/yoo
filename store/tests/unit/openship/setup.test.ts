@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { buildSchema, graphql } from "graphql";
 import { describe, expect, it } from "vitest";
-import { stageLink, stageMatch, ensureLocalChannel, ensureSourceShop } from "@/lib/openship/setup";
+import { stageLink, stageMatch, ensureLocalChannel, ensureSourceShop, ensureSyntheticChannelPlatform, attachSyntheticChannelPlatform } from "@/lib/openship/setup";
 import type { OpenShipRequest } from "@/lib/openship/transport";
 
 // Execute the public operation against the pinned generated GraphQL contract.
@@ -17,10 +17,13 @@ function fixture() {
   const channelItems: any[] = [];
   const matches: any[] = [];
   const shops: any[] = [];
+  const platforms: any[] = [];
   let creates = 0;
   let channelCreates = 0;
   let matchCreates = 0;
   let shopCreates = 0;
+  let platformCreates = 0;
+  let channelUpdates = 0;
   const owner = { id: "operator" };
   const rootValue = {
     authenticatedItem: () => ({ __typename: "User", id: "operator" }),
@@ -104,6 +107,40 @@ function fixture() {
       matches.push(match);
       return match;
     },
+    channelPlatforms: ({ where }: { where?: { name?: { equals?: string } } }) => {
+      const name = where?.name?.equals;
+      return platforms.filter(platform => !name || platform.name === name);
+    },
+    createChannelPlatform: ({ data }: { data: any }): any => {
+      platformCreates++;
+      const platform = {
+        id: `platform-${platformCreates}`, user: owner, name: data.name,
+        ...Object.fromEntries([
+          "searchProductsFunction", "getProductFunction", "createPurchaseFunction",
+          "createWebhookFunction", "oAuthFunction", "oAuthCallbackFunction",
+          "createTrackingWebhookHandler", "cancelPurchaseWebhookHandler",
+          "getWebhooksFunction", "deleteWebhookFunction",
+        ].map(slot => [slot, data[slot] ?? null])),
+      };
+      platforms.push(platform);
+      return platform;
+    },
+    channelPlatform: ({ where }: { where?: { id?: string } }) =>
+      platforms.find(platform => platform.id === where?.id) ?? null,
+    updateChannel: ({ where, data }: { where: { id: string }; data: any }) => {
+      const channel = channels.find(candidate => candidate.id === where.id) as any;
+      if (!channel) return null;
+      channelUpdates++;
+      if (data.platform?.connect?.id) {
+        const platform = platforms.find(candidate => candidate.id === data.platform.connect.id);
+        if (!platform) throw new Error("Connect target platform does not exist.");
+        channel.platform = {
+          id: platform.id, name: platform.name,
+          createPurchaseFunction: platform.createPurchaseFunction,
+        };
+      }
+      return { id: channel.id, platform: channel.platform };
+    },
     links: () => links,
     createLink: ({ data }: { data: any }) => {
       creates++;
@@ -121,7 +158,7 @@ function fixture() {
     if (result.errors) throw new Error(result.errors.map(error => error.message).join("; "));
     return result.data as T;
   };
-  return { request, links, channels, matches, shops, rootValue, creates: () => creates, channelCreates: () => channelCreates, matchCreates: () => matchCreates, shopCreates: () => shopCreates };
+  return { request, links, channels, matches, shops, platforms, rootValue, creates: () => creates, channelCreates: () => channelCreates, matchCreates: () => matchCreates, shopCreates: () => shopCreates, platformCreates: () => platformCreates, channelUpdates: () => channelUpdates };
 }
 
 describe("stageLink", () => {
@@ -335,5 +372,175 @@ describe("stageMatch", () => {
     (f.channels[0] as any).platform = { createPurchaseFunction: "openfront" };
     await expect(stageMatch(f.request, input)).rejects.toThrow("no platform");
     expect(f.matchCreates()).toBe(0);
+  });
+});
+
+describe("ensureSyntheticChannelPlatform", () => {
+  it("creates the synthetic platform row once and reuses it on repeat", async () => {
+    const f = fixture();
+    const first = await ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" });
+    expect(first).toEqual({ id: "platform-1", created: true });
+    const repeat = await ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" });
+    expect(repeat).toEqual({ id: "platform-1", created: false });
+    expect(f.platformCreates()).toBe(1);
+    expect(f.platforms[0]).toMatchObject({ name: "synthetic", createPurchaseFunction: "synthetic" });
+  });
+
+  it("refuses a same-name row with different adapter functions without writing", async () => {
+    const f = fixture();
+    f.platforms.push({
+      id: "platform-x", user: { id: "operator" }, name: "synthetic",
+      searchProductsFunction: "openfront", getProductFunction: null,
+      createPurchaseFunction: null, createWebhookFunction: null, oAuthFunction: null,
+      oAuthCallbackFunction: null, createTrackingWebhookHandler: null,
+      cancelPurchaseWebhookHandler: null, getWebhooksFunction: null, deleteWebhookFunction: null,
+    });
+    await expect(ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" }))
+      .rejects.toThrow("different adapter functions");
+    expect(f.platformCreates()).toBe(0);
+  });
+
+  it("refuses ambiguous duplicate rows without writing", async () => {
+    const f = fixture();
+    const row = () => ({
+      id: "platform-x", user: { id: "operator" }, name: "synthetic",
+      searchProductsFunction: "synthetic", getProductFunction: "synthetic",
+      createPurchaseFunction: "synthetic", createWebhookFunction: "synthetic",
+      oAuthFunction: "synthetic", oAuthCallbackFunction: "synthetic",
+      createTrackingWebhookHandler: "synthetic", cancelPurchaseWebhookHandler: "synthetic",
+      getWebhooksFunction: "synthetic", deleteWebhookFunction: "synthetic",
+    });
+    f.platforms.push(row(), { ...row(), id: "platform-y" });
+    await expect(ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" }))
+      .rejects.toThrow("resolve the conflict");
+    expect(f.platformCreates()).toBe(0);
+  });
+
+  it("ignores same-name rows owned by other operators", async () => {
+    const f = fixture();
+    f.platforms.push({
+      id: "foreign", user: { id: "someone-else" }, name: "synthetic",
+      searchProductsFunction: "synthetic", getProductFunction: "synthetic",
+      createPurchaseFunction: "synthetic", createWebhookFunction: "synthetic",
+      oAuthFunction: "synthetic", oAuthCallbackFunction: "synthetic",
+      createTrackingWebhookHandler: "synthetic", cancelPurchaseWebhookHandler: "synthetic",
+      getWebhooksFunction: "synthetic", deleteWebhookFunction: "synthetic",
+    });
+    await expect(ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" }))
+      .resolves.toEqual({ id: "platform-1", created: true });
+    expect(f.platformCreates()).toBe(1);
+  });
+
+  it("rejects a foreign session before writing", async () => {
+    const f = fixture();
+    f.rootValue.authenticatedItem = () => ({ __typename: "User", id: "other" });
+    await expect(ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" }))
+      .rejects.toThrow("ownership");
+    expect(f.platformCreates()).toBe(0);
+  });
+
+  it("rejects an unverified create result without retrying", async () => {
+    const f = fixture();
+    const create = f.rootValue.createChannelPlatform;
+    f.rootValue.createChannelPlatform = (args: any) => {
+      const platform = create(args);
+      platform.searchProductsFunction = "openfront";
+      return platform;
+    };
+    await expect(ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" }))
+      .rejects.toThrow("inspect state before retrying");
+    expect(f.platformCreates()).toBe(1);
+  });
+});
+
+describe("attachSyntheticChannelPlatform", () => {
+  const attachInput = { ownerId: "operator", channelId: "channel", platformId: "platform-1" };
+  const makeAttached = async (f = fixture()) => {
+    const platform = await ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" });
+    return { f, platformId: platform.id };
+  };
+
+  it("attaches the verified platform through updateChannel", async () => {
+    const { f, platformId } = await makeAttached();
+    await expect(attachSyntheticChannelPlatform(f.request, { ...attachInput, platformId }))
+      .resolves.toEqual({ channelId: "channel", platformId, attached: true });
+    expect(f.channelUpdates()).toBe(1);
+    expect((f.channels[0] as any).platform.createPurchaseFunction).toBe("synthetic");
+  });
+
+  it("reuses an existing identical attachment without writing", async () => {
+    const { f, platformId } = await makeAttached();
+    await attachSyntheticChannelPlatform(f.request, { ...attachInput, platformId });
+    await expect(attachSyntheticChannelPlatform(f.request, { ...attachInput, platformId }))
+      .resolves.toEqual({ channelId: "channel", platformId, attached: false });
+    expect(f.channelUpdates()).toBe(1);
+  });
+
+  it("refuses a channel that already carries a different platform", async () => {
+    const { f, platformId } = await makeAttached();
+    (f.channels[0] as any).platform = { id: "platform-other" };
+    await expect(attachSyntheticChannelPlatform(f.request, { ...attachInput, platformId }))
+      .rejects.toThrow("already carries a different platform");
+    expect(f.channelUpdates()).toBe(0);
+  });
+
+  it("refuses a platform row that is not the synthetic adapter", async () => {
+    const f = fixture();
+    f.platforms.push({
+      id: "platform-1", user: { id: "operator" }, name: "synthetic",
+      createPurchaseFunction: "openfront", searchProductsFunction: null,
+      getProductFunction: null, createWebhookFunction: null, oAuthFunction: null,
+      oAuthCallbackFunction: null, createTrackingWebhookHandler: null,
+      cancelPurchaseWebhookHandler: null, getWebhooksFunction: null, deleteWebhookFunction: null,
+    });
+    await expect(attachSyntheticChannelPlatform(f.request, attachInput))
+      .rejects.toThrow("not the synthetic adapter");
+    expect(f.channelUpdates()).toBe(0);
+  });
+
+  it("refuses a missing or foreign platform row without writing", async () => {
+    const f = fixture();
+    f.platforms.push({
+      id: "platform-1", user: { id: "someone-else" }, name: "synthetic",
+      createPurchaseFunction: "synthetic", searchProductsFunction: "synthetic",
+      getProductFunction: "synthetic", createWebhookFunction: "synthetic",
+      oAuthFunction: "synthetic", oAuthCallbackFunction: "synthetic",
+      createTrackingWebhookHandler: "synthetic", cancelPurchaseWebhookHandler: "synthetic",
+      getWebhooksFunction: "synthetic", deleteWebhookFunction: "synthetic",
+    });
+    await expect(attachSyntheticChannelPlatform(f.request, attachInput))
+      .rejects.toThrow("was not found for this operator");
+    expect(f.channelUpdates()).toBe(0);
+  });
+
+  it("rejects an unverified update result without retrying", async () => {
+    const { f, platformId } = await makeAttached();
+    f.rootValue.updateChannel = () => ({ id: "channel", platform: null });
+    await expect(attachSyntheticChannelPlatform(f.request, { ...attachInput, platformId }))
+      .rejects.toThrow("inspect state before retrying");
+    expect(f.channelUpdates()).toBe(0);
+  });
+
+  it("rejects blank inputs before any request", async () => {
+    const f = fixture();
+    await expect(attachSyntheticChannelPlatform(f.request, { ...attachInput, platformId: "  " }))
+      .rejects.toThrow("required");
+    expect(f.channelUpdates()).toBe(0);
+    expect(f.platformCreates()).toBe(0);
+  });
+
+  it("completes the staged flow: channel, link, platform, then attach", async () => {
+    const f = fixture();
+    const channel = await ensureLocalChannel(f.request, { ownerId: "operator", name: "local-test-supplier" });
+    await stageLink(f.request, { ownerId: "operator", shopId: "shop", channelId: channel.id });
+    const platform = await ensureSyntheticChannelPlatform(f.request, { ownerId: "operator" });
+    await expect(attachSyntheticChannelPlatform(f.request, {
+      ownerId: "operator", channelId: channel.id, platformId: platform.id,
+    })).resolves.toEqual({ channelId: channel.id, platformId: platform.id, attached: true });
+    expect(f.creates()).toBe(1);
+    expect(f.channelCreates()).toBe(0); // fixture pre-seeds the named channel
+    expect(f.platformCreates()).toBe(1);
+    expect(f.channelUpdates()).toBe(1);
+    expect(f.links[0].filters).toEqual([{ field: "id", type: "in", value: [] }]);
   });
 });

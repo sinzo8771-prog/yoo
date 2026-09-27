@@ -88,9 +88,40 @@ model Product {
   status             ProductStatusType   @default(draft)
   externalId         String              @default("")
   productCollections ProductCollection[] @relation("Product_productCollections")
+  /// Task 22, Step 4 — catalog media. Declared here because
+  /// `scripts/seed-catalog.ts` writes it; the relation name and the implicit
+  /// join table `_Product_productImages` must stay identical to upstream.
+  productImages      ProductImage[]      @relation("Product_productImages")
   productVariants    ProductVariant[]    @relation("ProductVariant_product")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @default(now()) @updatedAt
+}
+
+/// Upstream `ProductImage`, minus the relations this seeder never writes
+/// (`productVariants` / `ProductVariant.primaryImage`). Every column name, type
+/// and default matches `openfront/schema.prisma`.
+///
+/// `image_*` columns describe an UPLOADED asset handled by the commerce
+/// backend's storage provider. The production catalog has no uploaded asset, so
+/// it writes only `imagePath` (a root-relative URL this deployment serves) plus
+/// the measured facts about that file (`width`, `height`, `filesize`,
+/// `extension`) and the licence record in `metadata`. `image_id` is left null on
+/// purpose: setting it would make the backend advertise a URL for a file that
+/// does not exist in its storage.
+model ProductImage {
+  id              String   @id @default(cuid())
+  image_id        String?
+  image_filesize  Int?
+  image_width     Int?
+  image_height    Int?
+  image_extension String?
+  imagePath       String   @default("")
+  altText         String   @default("")
+  order           Int?     @default(0)
+  metadata        Json?
+  products        Product[] @relation("Product_productImages")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 }
 
 model ProductCollection {
@@ -110,6 +141,11 @@ model ProductVariant {
   inventoryQuantity Int
   allowBackorder    Boolean       @default(false)
   manageInventory   Boolean       @default(true)
+  /// Task 22, Step 3 — the fulfillment record for this sellable variant: either
+  /// a 1:1 supplier SKU mapping or an explicit manual-fulfillment rule. Written
+  /// by `scripts/seed-catalog.ts` from `scripts/catalog/fulfillment.ts`, so the
+  /// mapping is auditable in the database and not only in a file.
+  metadata          Json?
   variantRank       Int?          @default(0)
   product           Product?      @relation("ProductVariant_product", fields: [productId], references: [id])
   productId         String?       @map("product")

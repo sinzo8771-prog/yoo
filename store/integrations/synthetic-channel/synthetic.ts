@@ -18,6 +18,7 @@ type SyntheticCartItem = { variantId: string; quantity: number };
 type SyntheticPurchase = {
   purchaseId: string;
   status: "accepted" | "rejected";
+  lines: SyntheticCartItem[];
   trackingNumber: string | null;
   trackingCompany: string | null;
   cancelled: boolean;
@@ -56,8 +57,9 @@ export async function createPurchaseFunction({
       return { error: `Synthetic channel rejected unknown SKU or malformed item: ${JSON.stringify(item?.variantId ?? item)}` };
     }
   }
-  // Live OpenShip does not forward idempotencyKey, so derive the identity from
-  // the request itself when absent: same cart + address = same purchase.
+  // The pinned router (placeMultipleOrders.ts) forwards claim.attemptKey as
+  // idempotencyKey, so a retried claim dedupes here. Fall back to the request
+  // identity (same cart + address = same purchase) for callers without a key.
   const identity = idempotencyKey
     ? String(idempotencyKey)
     : stableKey([cartItems.map(item => [item.variantId, item.quantity]), shipping ?? null]);
@@ -67,7 +69,9 @@ export async function createPurchaseFunction({
   }
   const purchaseId = `syn_purchase_${stableKey([identity]).slice(0, 16)}`;
   purchases.set(identity, {
-    purchaseId, status: "accepted", trackingNumber: null, trackingCompany: null, cancelled: false,
+    purchaseId, status: "accepted",
+    lines: cartItems.map(item => ({ variantId: item.variantId, quantity: item.quantity })),
+    trackingNumber: null, trackingCompany: null, cancelled: false,
   });
   return {
     purchaseId,
@@ -94,6 +98,14 @@ export function fulfillPurchase({ purchaseId }: { purchaseId: string }):
     }
   }
   return { error: `Unknown purchase ${purchaseId}.` };
+}
+
+/**
+ * Read-only snapshot of purchases created by this adapter (identity -> record).
+ * For tests and operator inspection; never mutates state.
+ */
+export function inspectSyntheticPurchases(): SyntheticPurchase[] {
+  return [...purchases.values()];
 }
 
 export function cancelPurchase({ purchaseId }: { purchaseId: string }):

@@ -15,7 +15,8 @@ import { RiLoader2Fill } from "@remixicon/react";
 interface ShippingOption {
   id: string;
   name: string;
-  calculatedAmount: string;
+  /** Openfront's formatted display price; omitted when the backend did not provide one. */
+  calculatedAmount?: string;
 }
 
 interface ShippingProps {
@@ -27,10 +28,10 @@ interface ShippingProps {
         name: string;
       };
     }[];
-    shippingAddress: any;
-    billingAddress: any;
-    email: string;
-    shipping: string;
+    shippingAddress?: unknown;
+    billingAddress?: unknown;
+    email?: string;
+    shipping?: string;
   };
   availableShippingMethods: ShippingOption[] | null
 }
@@ -97,9 +98,9 @@ const Shipping: React.FC<ShippingProps> = ({
           )}
         </h2>
         {!isOpen &&
-          cart?.shippingAddress &&
-          cart?.billingAddress &&
-          cart?.email && (
+          cart?.shippingAddress != null &&
+          cart?.billingAddress != null &&
+          typeof cart?.email === "string" && (
             <p>
               <Button
                 onClick={handleEdit}

@@ -303,8 +303,21 @@ Confirmed in this repo:
   remain open.
 - Webhook signature, `messageId` dedup, and the sandbox status ladder are
   documented by CJ but were not exercised (they need a purchase to exist).
-- No CJ → OpenShip adapter module has been written yet. This document describes
-  how; it does not claim one exists.
+- A CJ → OpenShip adapter module **now exists**: `store/integrations/cj-channel/cj.ts`,
+  mirrored verbatim to `openship/features/integrations/channel/cj.ts` (that
+  checkout is git-ignored by the parent repo — copy it, never edit the copy).
+  Its **read paths** implement §5 (search via `listV2`, variant lookup,
+  per-warehouse stock) and were exercised live read-only; id handling follows
+  §6 and envelope handling follows §5. **Every write path fails closed** with a
+  specific reason (§7): purchase creation requires an idempotency key the pinned
+  mutation never forwards, cancellation is refused because OpenShip only
+  rewrites local status, webhook registration/OAuth have no verified CJ
+  contract, and both webhook handlers reject unverified events because the
+  pinned routes parse JSON before dispatch, destroying the raw body HMAC needs.
+  Contract tests (26, all passing, no network) live at
+  `store/tests/unit/cj-channel/cj.test.ts`. Unit tests prove the fail-closed
+  contract and request shapes, **not** live CJ behavior; the bullets above
+  about untested order creation, cancellation and webhooks still stand.
 ## 11. Related documents
 
 - `docs/ops/cj-integration-requirements.md` — what CJ must provide, tagged by
@@ -321,6 +334,7 @@ Confirmed in this repo:
 - `docs/ops/openship-setup.md` — provisioning the OpenShip-side rows
   (`Shop`, `ChannelPlatform`, `Link`, `Match`) that §4 refers to.
 
-Two of the above are **templates, not records of finished work**: no CJ adapter
-module exists yet (§10), so nothing in this document should be read as a claim
-that CJ fulfillment is operational.
+Two of the above are **templates, not records of finished work**. The CJ adapter
+module exists (§10) but is read-only by design: reads are verified, writes fail
+closed, and routing stays disabled, so nothing in this document should be read
+as a claim that CJ fulfillment is operational.

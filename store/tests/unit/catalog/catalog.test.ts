@@ -285,6 +285,32 @@ describe("price selection", () => {
     const [p] = await getFeaturedProducts();
     expect(p.thumbnail).toBe("https://cdn/a.webp");
   });
+
+  it("exposes imagePath-only images (Task 22 media has no stored asset)", async () => {
+    requestMock.mockResolvedValue({
+      products: [
+        rawProduct({
+          thumbnail: null,
+          productImages: [
+            {
+              image: null,
+              imagePath: "/images/catalog/oak-serving-board-1-front.png",
+              altText: "Illustration: a tall solid oak serving board",
+              order: 0,
+            },
+          ],
+        }),
+      ],
+    });
+    const [p] = await getFeaturedProducts();
+    expect(p.images).toEqual([
+      {
+        url: "/images/catalog/oak-serving-board-1-front.png",
+        alt: "Illustration: a tall solid oak serving board",
+      },
+    ]);
+    expect(p.thumbnail).toBe("/images/catalog/oak-serving-board-1-front.png");
+  });
 });
 
 describe("read caching", () => {
