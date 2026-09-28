@@ -19,7 +19,7 @@
  * the filesystem — never `process.env` — so no variable can turn "clone is
  * missing" into "clone is present" and quietly skip a real failure.
  */
-import { it } from "vitest";
+import { describe, it } from "vitest";
 import { hasReferenceClone, type ReferenceClone } from "../scripts/reference-clones";
 
 export { hasReferenceClone };
@@ -36,11 +36,26 @@ export function referenceCloneMissing(clone: ReferenceClone): boolean {
  * One skipped placeholder carrying the reason, written only when the clone is
  * absent. Call it once per file, at the top, so the report says why the file
  * contributed no tests instead of just looking thin.
+ *
+ * Two vitest 3 collector constraints shape this helper and its call sites:
+ *
+ * 1. No unconditional top-level HOOKS (`beforeAll`/`beforeEach`/`afterEach`)
+ *    may remain in a file whose real suites are all `describe.skipIf(true)` —
+ *    collection fails with "failed to find the runner/suite". So call sites
+ *    keep their lazy `beforeAll`/`beforeEach` INSIDE the skipped describes.
+ * 2. A file whose suites are ALL skipped collects to zero suites, which
+ *    vitest reports as "No test suite found in file". So this helper registers
+ *    one unconditional `describe` holding a single `it.skip(reason)`: the file
+ *    collects exactly one skipped test, runs zero, passes, and the JUnit XML
+ *    CI uploads on failure carries the environment reason.
  */
 export function noteMissingReferenceClone(clone: ReferenceClone): void {
   if (hasReferenceClone(clone)) return;
-  it.skip(
-    `[reference clone missing] ../${clone}/ is not checked out, so the pinned-code tests in this file are skipped`,
-    () => {}
-  );
+  // Unconditional suite, skipped test: the file still "has a suite" for the
+  // collector even when every real suite is `describe.skipIf(true)`. Hooks
+  // must stay out of here — one stray top-level `beforeAll` reintroduces the
+  // "failed to find the runner" failure this dance avoids.
+  describe(`[reference clone missing] ../${clone}/ is not checked out`, () => {
+    it.skip(`pinned-code tests skipped: ../${clone}/ is not checked out here`, () => {});
+  });
 }

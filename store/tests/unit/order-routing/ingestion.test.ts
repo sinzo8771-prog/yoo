@@ -11,9 +11,12 @@ import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/refere
 //
 // Task 23 (CI follow-up): the pinned executor and webhook-security modules live
 // in `../openship/`, one of the gitignored reference clones, so they are
-// imported in `beforeAll` and the suites skip when that clone is not checked
-// out. The `typeof import(...)` annotations keep every call site type-checked
-// wherever the clone *is* checked out.
+// imported in a `beforeAll` INSIDE each skipped suite and the suites skip via
+// `describe.skipIf(cloneMissing)` when that clone is not checked out. The
+// `beforeAll` must not sit at file top level: vitest 3 fails collection when a
+// file registers hooks but all of its suites are skipped. The
+// `typeof import(...)` annotations keep every call site type-checked wherever
+// the clone *is* checked out.
 
 const clone: ReferenceClone = "openship";
 const cloneMissing = referenceCloneMissing(clone);
@@ -23,16 +26,22 @@ let handleShopOrderWebhook: typeof import("../../../../openship/features/integra
 let handleShopCancelWebhook: typeof import("../../../../openship/features/integrations/shop/lib/executor")["handleShopCancelWebhook"];
 let deriveOpenFrontShopWebhookSecret: typeof import("../../../../openship/features/integrations/shop/openfront-webhook-security")["deriveOpenFrontShopWebhookSecret"];
 let verifyOpenFrontShopWebhook: typeof import("../../../../openship/features/integrations/shop/openfront-webhook-security")["verifyOpenFrontShopWebhook"];
+// The pinned create-order route must be lazy for the same reason: a static
+// import resolves while the module graph is collected, i.e. *before*
+// `describe.skipIf(cloneMissing)` can skip — so a clone-less checkout (CI)
+// would fail collection instead of skipping.
+let POST: typeof import("../../../../openship/app/api/handlers/shop/create-order/[shopId]/route")["POST"];
 
-beforeAll(async () => {
-  if (cloneMissing) return;
+async function loadPinnedIngestion() {
   ({ handleShopOrderWebhook, handleShopCancelWebhook } = await import(
     "../../../../openship/features/integrations/shop/lib/executor"
   ));
   ({ deriveOpenFrontShopWebhookSecret, verifyOpenFrontShopWebhook } = await import(
     "../../../../openship/features/integrations/shop/openfront-webhook-security"
   ));
-});
+  ({ POST } = await import("../../../../openship/app/api/handlers/shop/create-order/[shopId]/route"));
+}
+
 
 const SECRET = "op-secret";
 const signWith = (secret: string, event: unknown) =>
@@ -84,6 +93,7 @@ const platform = () => ({
 });
 
 describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): signature boundary", () => {
+  beforeAll(loadPinnedIngestion);
   it("accepts a correctly signed event through the real executor dispatch", async () => {
     const event = baseEvent();
     const result = await handleShopOrderWebhook({
@@ -153,6 +163,7 @@ describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): signature bound
   });
 });
 describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): Openfront ? OpenShip transform", () => {
+  beforeAll(loadPinnedIngestion);
   const ingest = async () => {
     const event = baseEvent();
     const result = await handleShopOrderWebhook({
@@ -227,6 +238,7 @@ describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): Openfront ? Ope
 });
 
 describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): cancellation webhook", () => {
+  beforeAll(loadPinnedIngestion);
   it("returns the source order ID for a valid cancellation event", async () => {
     const event = { topic: "order.cancelled", data: { id: "of_order_1" } };
     const result = await handleShopCancelWebhook({
@@ -250,7 +262,6 @@ describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): cancellation we
 // (dedupe on orderId+shop, concurrent-race recovery, fail-closed errors).
 // The executor/adapter run for real; Keystone resolvers are injected below.
 // ---------------------------------------------------------------------------
-import { POST } from "../../../../openship/app/api/handlers/shop/create-order/[shopId]/route";
 
 function seedShop() {
   const orders: any[] = [];
@@ -328,6 +339,7 @@ const callRoute = (event: unknown, signature?: string) =>
   POST(requestFrom(event, signature), { params: Promise.resolve({ shopId: "shop-1" }) });
 
 describe.skipIf(cloneMissing)("order ingestion (Task 13 step 2): create-order route", () => {
+  beforeAll(loadPinnedIngestion);
   it("creates the order once from a signed webhook", async () => {
     const db = seedShop();
     const event = baseEvent();

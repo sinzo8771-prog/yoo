@@ -18,7 +18,6 @@ import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/refere
 const clone: ReferenceClone = "openship";
 const cloneMissing = referenceCloneMissing(clone);
 noteMissingReferenceClone(clone);
-
 let schemaCache: GraphQLSchema | undefined;
 
 function schema(): GraphQLSchema {

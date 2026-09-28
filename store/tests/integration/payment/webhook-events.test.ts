@@ -21,14 +21,13 @@
  * the gitignored reference clones, so the import is skipped (with a reason) when
  * the clone is not checked out instead of failing on an unresolved specifier.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReferenceClone } from "@/scripts/reference-clones";
 import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/reference-clones";
 
 const clone: ReferenceClone = "openfront";
 const cloneMissing = referenceCloneMissing(clone);
 noteMissingReferenceClone(clone);
-
 const MUTATION_SPEC = [
   "../../../../openfront/features/keystone/mutations/",
   "handlePaymentProviderWebhook.ts",
@@ -43,11 +42,11 @@ type Mutation = (
 
 let handlePaymentProviderWebhook: Mutation;
 
-beforeAll(async () => {
-  if (cloneMissing) return;
+async function loadPinnedMutation() {
+  if (handlePaymentProviderWebhook !== undefined) return;
   const mod = await import(MUTATION_SPEC);
   handlePaymentProviderWebhook = mod.default;
-});
+}
 
 type Harness = {
   context: any;
@@ -189,12 +188,16 @@ const callArgs = (event: unknown) => ({
   headers: {},
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.clearAllMocks();
-});
 
 describe.skipIf(cloneMissing)("duplicate provider events (Task 16, Step 3)", () => {
+  beforeEach(async () => {
+    await loadPinnedMutation();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
   it("processes a verified capture once and acknowledges the redelivery", async () => {
     const h = makeHarness();
     const fetchMock = stubAdapterFetch(goodEvent);
@@ -277,6 +280,14 @@ describe.skipIf(cloneMissing)("duplicate provider events (Task 16, Step 3)", () 
 });
 
 describe.skipIf(cloneMissing)("webhook authentication (Task 16, Step 2)", () => {
+  beforeEach(async () => {
+    await loadPinnedMutation();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
   it("rejects an unverifiable event and persists nothing at all", async () => {
     const h = makeHarness();
     vi.stubGlobal(

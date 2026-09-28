@@ -69,6 +69,17 @@ jobs:
 
       - run: npm ci
 
+      # `tsc` must see the same tree here as on a workstation. The generated
+      # Prisma client (`store/generated/`, gitignored) is imported by
+      # scripts/seed-*.ts; without this step those imports surface as *new*
+      # TS2307 problems in CI only — a machine difference the gate rightly
+      # refuses to forgive. `prisma generate` does not connect; the URL is the
+      # build job's placeholder, not a credential (see header note 2).
+      - name: Generate Prisma client
+        env:
+          OPENFRONT_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+        run: npm run db:generate:openfront
+
       # Fails on any lint problem not already recorded in the baseline.
       - run: npm run lint:ci
 
@@ -155,6 +166,16 @@ jobs:
           cache: npm
           cache-dependency-path: store/package-lock.json
       - run: npm ci
+      # This job checks out its own tree (jobs share no workspace), so it must
+      # build `.next` itself: the Playwright webServer boots `next start`
+      # (playwright.config.ts) which refuses to run without a production build.
+      # Same placeholder env as the build job — prebuild runs `prisma generate`
+      # and `next build` never opens a connection (header note 2).
+      - name: Build production bundle
+        env:
+          OPENFRONT_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+          SESSION_SECRET: ci-session-secret-0123456789abcdef0123456789
+        run: npm run build
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       # The smoke suite boots `next start` itself (see playwright.config.ts

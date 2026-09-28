@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * itself is checked for *structure* (not its exact counts) so regenerating it
  * after real fixes stays a routine, expected change.
  */
-import { diff, tally, total } from "@/scripts/quality-gate";
+import { diff, normalizeTypeMessage, tally, total } from "@/scripts/quality-gate";
 
 const BASELINE_PATH = path.resolve(__dirname, "../../../scripts/quality-baseline.json");
 
@@ -53,6 +53,21 @@ describe("quality gate comparison", () => {
   it("treats an empty baseline as 'everything is new'", () => {
     const result = diff({}, tally(["a | warn | rule | m"]));
     expect(result.added).toEqual([["a | warn | rule | m", 1]]);
+  });
+
+  it("normalizes absolute paths in tsc messages so the same problem keys identically on Windows and Linux", () => {
+    // TS7016 quotes the file tsc actually resolved, which is machine-specific
+    // (see normalizeTypeMessage): keying it verbatim makes the same problem
+    // "new" on every other machine. Relative specifiers must survive intact.
+    expect(normalizeTypeMessage("Could not find a declaration file for module 'lodash'. 'C:/Users/dev/x/node_modules/lodash/lodash.js' implicitly has an 'any' type.")).toBe(
+      "Could not find a declaration file for module 'lodash'. '{{path}}' implicitly has an 'any' type."
+    );
+    expect(normalizeTypeMessage("Could not find a declaration file for module 'lodash'. '/home/runner/work/yoo/yoo/store/node_modules/lodash/lodash.js' implicitly has an 'any' type.")).toBe(
+      "Could not find a declaration file for module 'lodash'. '{{path}}' implicitly has an 'any' type."
+    );
+    expect(normalizeTypeMessage("Cannot find module '../generated/openfront-db' or its corresponding type declarations.")).toBe(
+      "Cannot find module '../generated/openfront-db' or its corresponding type declarations."
+    );
   });
 });
 

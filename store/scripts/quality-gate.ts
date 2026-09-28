@@ -33,6 +33,9 @@
  *  - an embedded absolute path + code frame inside a rule's message (React
  *    Compiler rules do this) — normalized away in `normalizeLintMessage`, so
  *    the key is the same on Windows and on the Linux runner;
+ *  - an embedded absolute path inside a *tsc* message (`TS7016` quotes the file
+ *    it actually resolved, which is machine-specific) — normalized away in
+ *    `normalizeTypeMessage` for the same reason;
  *  - `TS2307` for a module that lives in one of the pinned reference clones,
  *    which are gitignored and therefore absent in CI — classified by
  *    `isEnvironmentDependentTypeError` and *reported* rather than counted. Fix
@@ -191,6 +194,24 @@ function collectLint(): Collected {
   return { keys, environmentDependent: [] };
 }
 
+/**
+ * The message half of a typecheck key, with machine-specific absolute paths
+ * replaced by a placeholder.
+ *
+ * `TS7016` ("Could not find a declaration file for module 'x'") quotes the file
+ * tsc actually resolved — `'C:/Users/dev/…/lodash.js'` on a workstation,
+ * `'/home/runner/work/yoo/yoo/store/node_modules/lodash/lodash.js'` on the CI
+ * runner. Keyed verbatim, the *same* problem is "new" on every machine other
+ * than the one the baseline was written on, which is exactly the
+ * Windows-green/Linux-red failure `normalizeLintMessage` exists for on the lint
+ * side. Only the quoted absolute path is replaced; the identifying half of the
+ * message (which module, what is wrong with it) stays verbatim, and a relative
+ * quoted specifier (`'../generated/openfront-db'`, `'lodash'`) is untouched.
+ */
+export function normalizeTypeMessage(message: string): string {
+  return message.replace(/'(?:[A-Za-z]:[\\/]|\/)[^']*'/g, "'{{path}}'");
+}
+
 /** tsc lines look like: `path(line,col): error TSxxxx: message`. */
 function collectTypecheck(): Collected {
   const bin = path.join(ROOT, "node_modules", "typescript", "bin", "tsc");
@@ -200,9 +221,9 @@ function collectTypecheck(): Collected {
   for (const line of `${stdout}\n${stderr}`.split(/\r?\n/)) {
     const match = /^(.+?)\(\d+,\d+\):\s+(error|warning)\s+(TS\d+):\s*(.*)$/.exec(line.trim());
     if (!match) continue;
-    const [, file, kind, code, message] = match;
-    const key = `${toPosix(file)} | ${kind} | ${code} | ${message}`;
-    if (isEnvironmentDependentTypeError(file, code, message)) environmentDependent.push(key);
+    const [, file, kind, code, rawMessage] = match;
+    const key = `${toPosix(file)} | ${kind} | ${code} | ${normalizeTypeMessage(rawMessage)}`;
+    if (isEnvironmentDependentTypeError(file, code, rawMessage)) environmentDependent.push(key);
     else keys.push(key);
   }
   return { keys, environmentDependent };

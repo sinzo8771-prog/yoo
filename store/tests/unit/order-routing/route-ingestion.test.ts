@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import { state } from "../../stubs/openship-keystone-context";
 import type { ReferenceClone } from "@/scripts/reference-clones";
@@ -12,9 +12,11 @@ import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/refere
 //
 // Task 23 (CI follow-up): the route and the webhook-security helper live in
 // `../openship/`, one of the gitignored reference clones, so they are imported
-// in `beforeAll` and this suite skips when that clone is not checked out. The
-// `typeof import(...)` annotations keep every call site type-checked wherever
-// the clone *is* checked out.
+// in a `beforeEach` INSIDE the skipped suite and it skips via
+// `describe.skipIf(cloneMissing)` when that clone is not checked out (a
+// top-level `beforeAll` would fail vitest 3 collection when every suite is
+// skipped). The `typeof import(...)` annotations keep every call site
+// type-checked wherever the clone *is* checked out.
 
 const clone: ReferenceClone = "openship";
 const cloneMissing = referenceCloneMissing(clone);
@@ -23,13 +25,13 @@ noteMissingReferenceClone(clone);
 let POST: typeof import("../../../../openship/app/api/handlers/shop/create-order/[shopId]/route")["POST"];
 let deriveOpenFrontShopWebhookSecret: typeof import("../../../../openship/features/integrations/shop/openfront-webhook-security")["deriveOpenFrontShopWebhookSecret"];
 
-beforeAll(async () => {
-  if (cloneMissing) return;
+async function loadPinnedRoute() {
   ({ POST } = await import("../../../../openship/app/api/handlers/shop/create-order/[shopId]/route"));
   ({ deriveOpenFrontShopWebhookSecret } = await import(
     "../../../../openship/features/integrations/shop/openfront-webhook-security"
   ));
-});
+}
+
 
 const SHOP = {
   id: "shop-1", domain: "http://openfront.test", accessToken: "tok",
@@ -123,11 +125,12 @@ function fixture() {
   };
 }
 
-beforeEach(() => {
-  state.query = {};
-});
-
 describe.skipIf(cloneMissing)("create-order route ingestion (Task 13 step 2, route level)", () => {
+  beforeEach(async () => {
+    state.query = {};
+    await loadPinnedRoute();
+  });
+
   it("ingests a signed order end to end, preserving the source orderId", async () => {
     const f = fixture();
     state.query = f.query;

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReferenceClone } from "@/scripts/reference-clones";
 import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/reference-clones";
 
@@ -10,8 +10,10 @@ import { noteMissingReferenceClone, referenceCloneMissing } from "@/tests/refere
 // stubbed except the database.
 //
 // Task 23 (CI follow-up): those pinned modules live in `../openship/`, one of
-// the gitignored reference clones, so they are imported in `beforeAll` and this
-// suite skips when that clone is not checked out. The `typeof import(...)`
+// the gitignored reference clones, so they are imported in a `beforeEach`
+// INSIDE the skipped suite and it skips via `describe.skipIf(cloneMissing)`
+// when that clone is not checked out (a top-level `beforeAll` would fail
+// vitest 3 collection when every suite is skipped). The `typeof import(...)`
 // annotations keep every call site type-checked wherever the clone *is*
 // checked out.
 
@@ -23,12 +25,11 @@ let placeMultipleOrders: typeof import("../../../../openship/features/keystone/l
 let supplierPurchaseAttemptKey: typeof import("../../../../openship/features/keystone/lib/supplierPurchaseClaim")["supplierPurchaseAttemptKey"];
 let inspectSyntheticPurchases: typeof import("../../../../openship/features/integrations/channel/synthetic")["inspectSyntheticPurchases"];
 
-beforeAll(async () => {
-  if (cloneMissing) return;
+async function loadPinnedRouter() {
   ({ placeMultipleOrders } = await import("../../../../openship/features/keystone/lib/placeMultipleOrders"));
   ({ supplierPurchaseAttemptKey } = await import("../../../../openship/features/keystone/lib/supplierPurchaseClaim"));
   ({ inspectSyntheticPurchases } = await import("../../../../openship/features/integrations/channel/synthetic"));
-});
+}
 
 type Row = {
   id: string;
@@ -147,13 +148,13 @@ function fixture() {
   return { cartItems, orders, orderUpdates, addOrder, addItem, query, prisma };
 }
 
-beforeEach(() => {
-  // The adapter's purchase map is module-level and keyed by the claim key
-  // (which embeds the order ID), so unique order/item IDs isolate tests.
-  vi.restoreAllMocks();
-});
-
 describe.skipIf(cloneMissing)("synthetic end-to-end routing (pinned router + adapter)", () => {
+  beforeEach(async () => {
+    await loadPinnedRouter();
+    // The adapter's purchase map is module-level and keyed by the claim key
+    // (which embeds the order ID), so unique order/item IDs isolate tests.
+    vi.restoreAllMocks();
+  });
   it("purchases matched lines through the synthetic adapter and marks the order AWAITING", async () => {
     const f = fixture();
     f.addOrder("order-1");
