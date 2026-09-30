@@ -1476,6 +1476,20 @@ project-scoped installs`); `scripts/audit-gate.ts` strips that one env var from
 its `npm audit` child spawn, so `npm run audit:ci` runs the audit correctly on
 both this sandbox and CI (verified: 75 advisories ≥ high, all 75 allow-listed).
 
+Follow-up (2026-09-30, Task 23): the registry published four new high advisories
+after that review (brace-expansion x2, fast-uri, nodemailer), so `npm run
+audit:ci` failed on all four — the gate doing exactly what it was built for. They
+were cleared by upgrading precisely those packages: `brace-expansion@1.1.21` and
+`@2.1.7` (both `minimatch` parents allow it), `fast-uri@3.1.8` (under `ajv ^3`),
+and `nodemailer@^10.0.13` — the semver-major this section already identified, and
+safe because no store module imports nodemailer today. Those four bumps also
+resolved the 13 allow-listed brace-expansion / fast-uri / nodemailer entries
+(removed from `scripts/audit-allowlist.json`, `reviewed` bumped to 2026-09-30),
+leaving 62 advisories >= high and 62 allow-listed. A tree-wide `npm audit fix`
+was tried and rejected: it moved 107 packages, including `express-rate-limit`
+7 -> 8 and `@modelcontextprotocol/sdk` 1.15 -> 1.31, which is the "do not blind
+`npm audit fix`" rule recorded above.
+
 ---
 
 ## Task 19: SEO, analytics, and conversion measurement
@@ -1888,6 +1902,21 @@ server, asserting route availability and security headers) →
 history and executes `npm run audit:ci`, the allowlist-based audit gate in
 `store/scripts/audit-gate.ts`). Unit and integration test suites are
 hermetic, producing JUnit XML output.
+
+Follow-up (2026-09-30): the e2e job booted the production build with no backend
+and never became ready — Playwright's readiness probe only accepts 200-403 from
+`/us`, and three render-path data reads still threw instead of degrading
+(`SiteHeader`'s `listRegions()`, `SiteFooter`'s `getCollectionsList()` and
+`getCategoriesList()`), so every poll answered 500 (117 renders, each logging two
+uncaught RSC errors) and the job died on `Timed out waiting 120000ms from
+config.webServer`. Those three now follow the `store.ts` / `data.ts` fail-soft
+convention (`{ regions: null }`, `{ collections: [], count: 0 }`,
+`{ productCategories: [], productCategoriesCount: 0 }`), so `/us` renders 200
+with an empty header/footer payload when Openfront is unreachable:
+`npx playwright test` in that state is 5 passed / 3 skipped with zero uncaught
+RSC errors. The job also builds the app (`npm run build`) before the suite and
+the quality job generates the Prisma client, both of which the first runs of this
+pipeline were missing.
 
 - [x] **Step 2: Run deployment only from the protected branch/tag strategy used by the project.** (2026-09-26)
 
