@@ -21,7 +21,18 @@ export const listRegions = cache(async function () {
     }
   `;
 
-  return openfrontClient.request(LIST_REGIONS_QUERY);
+  try {
+    return await openfrontClient.request(LIST_REGIONS_QUERY);
+  } catch (error) {
+    // Fail soft (Task 23): SiteHeader renders on every storefront route, so an
+    // unreachable backend must degrade the country switcher, never turn the
+    // storefront's front door into a 500. A `null` region list is the
+    // documented "regions unavailable" contract: SideMenu hides the switcher
+    // and AccountProfilePage 404s rather than rendering data it cannot vouch
+    // for. Mirrors the fail-soft returns in `store.ts` / `data.ts`.
+    console.error("Error fetching regions list:", error);
+    return { regions: null };
+  }
 });
 
 export const getRegion = cache(async function (countryCode: string) {

@@ -50,15 +50,23 @@ export const getCollectionsList = cache(async function (offset = 0, limit = 3) {
     }
   `;
 
-  const data = await openfrontClient.request(GET_COLLECTIONS_LIST_QUERY, {
-    offset,
-    limit,
-  });
+  try {
+    const data = await openfrontClient.request(GET_COLLECTIONS_LIST_QUERY, {
+      offset,
+      limit,
+    });
 
-  return {
-    collections: data.productCollections,
-    count: data.productCollectionsCount,
-  };
+    return {
+      collections: data.productCollections,
+      count: data.productCollectionsCount,
+    };
+  } catch (error) {
+    // Fail soft (Task 23): SiteFooter renders on every storefront route; the
+    // footer's DB-driven link group is optional content, so an outage drops the
+    // group instead of failing the page. Mirrors `store.ts` / `data.ts`.
+    console.error("Error fetching collections list:", error);
+    return { collections: [], count: 0 };
+  }
 });
 
 export const getCollectionByHandle = cache(async function (handle: string) {

@@ -43,7 +43,15 @@ export const getCategoriesList = cache(async function (offset = 0, limit = 100) 
     }
   `;
 
-  return openfrontClient.request(GET_CATEGORIES_LIST_QUERY, { offset, limit });
+  try {
+    return await openfrontClient.request(GET_CATEGORIES_LIST_QUERY, { offset, limit });
+  } catch (error) {
+    // Fail soft (Task 23): same reasoning as `getCollectionsList` — the footer's
+    // category group is optional, and a backend outage must not 500 every page
+    // that renders the layout.
+    console.error("Error fetching categories list:", error);
+    return { productCategories: [], productCategoriesCount: 0 };
+  }
 });
 
 export const getCategoryByHandle = cache(async function (categoryHandle: string) {
